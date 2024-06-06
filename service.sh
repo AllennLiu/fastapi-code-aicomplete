@@ -4,6 +4,7 @@ LOOP_KEEP=True
 WORKDIR=$PWD
 SERVE_PORT=7860
 SERVE_HOST=0.0.0.0
+CPU_ARGS="--cpu"
 
 # SSH client public key
 SSH_PUB_KEY='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCxrbvTeCCQvOvMQqh98MPuJxpNlAwYQUueGrY1Z3byoNuR1bThjSAq9DGG6ANuRzrHDtxPXRxURQensNJdmKN0s37tpyvbvYV5Zjg0xUWgTpP+7QCzPGzXdsONZ6CR7cUL3phClMVnUFhERZ56gU+CqBHpFJskT9Qf2nxlTPf+1UFwlDag21Vi756u81wXyMUYs2GNQjVSnCF/5U92CSsNqENifxfEDdCyCmqTm9FntCH/wT8eHL0earjGPM4Jr83QtXjncxIwoqpSkrOAPq7s/0fSKrnYbb+RfMKKyIt5dxCM0HCNgfoDaVYuwp0fu5ujuR3Prdy3ert9UTMWp9/e2iMJsskb3O3nP3I45fO8vOWF9vX0ZM+Ok/pWIPJlBY52jyKaTqU/QiqXGqoqs0XKhQnyfPn3gQQL/Py/0Kzsf4FP2zkoQhKRBRXpISU/4y5g/bpary5LBCZqmG7GlB/+98B337FJMR3nZHZXm1aBns+ElqDZiM4ix5jC7WipchSUW5RWV3RRhkqX9KrS0WdrhFGovzm22QseUwNJul7ZnSsYf6WiScGEAh5rZywfr0ZriAww65g9Vv/s47Wx4lbX3mlyjwFMSIUZkf4L3Prs2rQSelDTVs4zRxKWa9ZKOmNDe8YmrvK+LIQ/NX6CQB0wEmLHUBBstewdNBccXRy9Rw== ieciec070168@IPT-070168-HP'
@@ -22,6 +23,7 @@ FastAPI backend service manager.
 
 Options:
   -s, --ssh       serve with SSH server only
+  --gpu           enable cuda with GPU device
 
 EOF
     exit 0
@@ -55,7 +57,7 @@ function server_forever
 function main
 {
     config_sshd
-    python app/main.py -H $SERVE_HOST -p $SERVE_PORT --cpu --quantize 4 --chatglm-cpp
+    python app/main.py -H $SERVE_HOST -p $SERVE_PORT $CPU_ARGS --quantize 4 --chatglm-cpp
     exit 0
 }
 
@@ -69,6 +71,9 @@ do
         -s|--ssh)
             config_sshd
             server_forever
+            ;;
+        --gpu)
+            CPU_ARGS=""
             ;;
         * ) echo "Invalid arguments, try '-h/--help' for more information."
             exit 1

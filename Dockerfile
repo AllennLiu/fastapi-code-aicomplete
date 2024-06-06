@@ -11,7 +11,7 @@ WORKDIR $NODE_SOURCE
 RUN date && apt-get update && \
     apt-get install -y --no-install-recommends \
         gcc g++ make vim curl git \
-        ssh sshpass plink telnet unzip
+        ssh sshpass plink telnet unzip tmux
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt || true
