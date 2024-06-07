@@ -1,4 +1,4 @@
-FROM code-geex-2:latest
+FROM seven6306/pretrained-model:ai-fastapi-copilot
 
 ENV TZ="Asia/Taipei"
 
@@ -10,7 +10,7 @@ WORKDIR $NODE_SOURCE
 
 RUN date && apt-get update && \
     apt-get install -y --no-install-recommends \
-        gcc g++ make vim curl git \
+        gcc g++ make vim curl git jq \
         ssh sshpass plink telnet unzip tmux
 
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -23,5 +23,7 @@ EXPOSE 7860 22
 USER root
 
 ENV PYTHONIOENCODING utf-8
+
+ENV LOAD_MODEL_DEVICE cpu
 
 CMD ["bash", "service.sh"]

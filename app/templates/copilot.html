@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Copilot</title>
+    </head>
+    <body>
+        <h1>Welcome Copilot AI Coding</h1>
+        <form action="">
+            <input type="text" id="messageText" autocomplete="off"/>
+            <button id="sendButton" type="button" onclick="sendMessage(event)">提交信息</button>
+        </form>
+        <ul id='messages'></ul>
+        <script>
+            var ws = new WebSocket("ws://172.17.1.243:7860/utils/copilot/ws");
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages')
+                var message = document.createElement('li')
+                var content = document.createTextNode(event.data)
+                message.appendChild(content)
+                messages.appendChild(message)
+            };
+            function sendMessage(event) {
+                var input = document.getElementById("messageText")
+                ws.send(input.value)
+                input.value = ''
+                event.preventDefault()
+            }
+        </script>
+    </body>
+</html>

@@ -1,5 +1,7 @@
+import os
 from typing import Dict
 from functools import lru_cache
+from starlette.config import Config
 from pydantic_settings import BaseSettings
 
 LANGUAGE_TAG: Dict[str, str] = {
@@ -73,8 +75,11 @@ LANGUAGE_TAG: Dict[str, str] = {
 }
 
 class Settings(BaseSettings):
-    app_name  : str = "CodeGeeX2 API"
+    app_name  : str = 'Code AI Complete API'
+    desc      : str = 'Integrating `CodeGeeX2-6B` + `ChatGLM3-6` model to make the World more friendly.'
     lang_tags : Dict[str, str] = LANGUAGE_TAG
+    private   : Config = Config(os.path.join('app', '.env'))
+    load_dev  : str = os.getenv('LOAD_MODEL_DEVICE') or 'cpu'
 
 @lru_cache
 def get_settings():

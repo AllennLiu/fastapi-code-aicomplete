@@ -23,7 +23,6 @@ FastAPI backend service manager.
 
 Options:
   -s, --ssh       serve with SSH server only
-  --gpu           enable cuda with GPU device
 
 EOF
     exit 0
@@ -57,7 +56,7 @@ function server_forever
 function main
 {
     config_sshd
-    python app/main.py -H $SERVE_HOST -p $SERVE_PORT $CPU_ARGS --quantize 4 --chatglm-cpp
+    uvicorn app.main:app --host $SERVE_HOST --port $SERVE_PORT --workers 1 --timeout-keep-alive 300
     exit 0
 }
 
@@ -71,9 +70,6 @@ do
         -s|--ssh)
             config_sshd
             server_forever
-            ;;
-        --gpu)
-            CPU_ARGS=""
             ;;
         * ) echo "Invalid arguments, try '-h/--help' for more information."
             exit 1
