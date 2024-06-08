@@ -73,13 +73,20 @@ LANGUAGE_TAG: Dict[str, str] = {
     "Verilog"      : "// language: Verilog",
     "Visual Basic" : "' language: Visual Basic"
 }
+DOTENV_CONFIG = os.path.join('app', '.env')
+
+class ModelConfig(BaseSettings):
+    chatbot_name     : str = 'THUDM/chatglm3-6b'
+    copilot_name     : str = 'THUDM/codegeex2-6b'
+    copilot_quantize : int = 4
 
 class Settings(BaseSettings):
     app_name  : str = 'Code AI Complete API'
     desc      : str = 'Integrating `CodeGeeX2-6B` + `ChatGLM3-6` model to make the World more friendly.'
     lang_tags : Dict[str, str] = LANGUAGE_TAG
-    private   : Config = Config(os.path.join('app', '.env'))
-    load_dev  : str = os.getenv('LOAD_MODEL_DEVICE') or 'cpu'
+    private   : Config = Config(DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None)
+    models    : ModelConfig = ModelConfig()
+    load_dev  : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
 
 @lru_cache
 def get_settings():

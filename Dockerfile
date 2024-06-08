@@ -4,6 +4,8 @@ ENV TZ="Asia/Taipei"
 
 ENV NODE_SOURCE /workspace
 
+RUN rm -rf $NODE_SOURCE/*
+
 COPY . $NODE_SOURCE
 
 WORKDIR $NODE_SOURCE
@@ -22,8 +24,10 @@ EXPOSE 7860 22
 
 USER root
 
-ENV PYTHONIOENCODING utf-8
-
+ENV PYTHONIOENCODING  utf-8
+ENV LANG              zh_CN.utf-8
+ENV LANGUAGE          zh_CN:zh:en_US:en
+ENV LC_ALL            zh_CN.utf-8
 ENV LOAD_MODEL_DEVICE cpu
 
 CMD ["bash", "service.sh"]

@@ -41,7 +41,7 @@
 - 生成第一個 `Python` 腳本 *(沒有 `jq` 工具的話，需自行將 response 文本貼在腳本中)*
 
   ```bash
-  curl -sX POST http://172.17.1.243:7860/utils/copilot \
+  curl -sX POST http://172.17.1.243:7860/ai/copilot \
     -H 'Content-Type: application/json'\
     -d '{ "lang": "Python", "prompt": "寫一個程序執行命令 ipmitool raw 6 1 判斷 00 在返回值中打印 Pass 不在就打印 Fail" }' | jq -r .response | tee test.py
   ```
@@ -69,6 +69,41 @@
   ```
 
   ![alt text](image.png)
+
+---
+
+## Troubleshooting
+
+- 如何監控 GPU 利用率？請先安裝 `cuda-toolkit` 工具。
+
+  ```bash
+  watch nvidia-smi
+  ```
+
+  ```bash
+  Every 2.0s: nvidia-smi                                                                                                                                                                                                                                   Blade-Allen: Fri Jun  7 21:06:49 2024
+
+  Fri Jun  7 21:06:49 2024
+  +-----------------------------------------------------------------------------------------+
+  | NVIDIA-SMI 550.69                 Driver Version: 551.95         CUDA Version: 12.4     |
+  |-----------------------------------------+------------------------+----------------------+
+  | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+  | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+  |                                         |                        |               MIG M. |
+  |=========================================+========================+======================|
+  |   0  NVIDIA GeForce RTX 4070 ...    On  |   00000000:01:00.0 Off |                  N/A |
+  | N/A   47C    P0             20W /  105W |       0MiB /   8188MiB |      0%      Default |
+  |                                         |                        |                  N/A |
+  +-----------------------------------------+------------------------+----------------------+
+
+  +-----------------------------------------------------------------------------------------+
+  | Processes:                                                                              |
+  |  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
+  |        ID   ID                                                               Usage      |
+  |=========================================================================================|
+  |  No running processes found                                                             |
+  +-----------------------------------------------------------------------------------------+
+  ```
 
 ---
 

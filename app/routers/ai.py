@@ -1,13 +1,16 @@
-from opencc import OpenCC
+from re import sub
+from torch import Tensor
 from datetime import datetime
 from pydantic import BaseModel
 from asyncio import sleep as asleep
+from typing import Generator, Iterator
 from fastapi.templating import Jinja2Templates
 from transformers import AutoTokenizer, AutoModel
 from starlette.responses import JSONResponse, HTMLResponse
 from fastapi import APIRouter, Request, WebSocket, HTTPException
 
 from ..config import get_settings
+from ..utils import websocket_catch, copilot_prompt
 
 try:
     import chatglm_cpp
@@ -19,12 +22,11 @@ except:
     print(warning_msg)
     enable_chatglm_cpp = False
 
-CC = OpenCC('tw2sp')
 app_settings = get_settings()
 
 router = APIRouter(
-    prefix    = '/utils',
-    tags      = [ 'utils' ],
+    prefix    = '/ai',
+    tags      = [ 'AI' ],
     responses = { 404: { "description": "Not found" } }
 )
 
@@ -39,30 +41,23 @@ def device(model_name: str, quantize: int, use_stream: bool = False) -> chatglm_
             return model
         print('chatglm-cpp not enabled, falling back to transformers')
 
-    if app_settings.load_dev == 'gpu':
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True).cuda()
-        if quantize in [ 4, 8 ]:
-            print(f'Model is quantized to INT{quantize} format.')
-            model = model.half().quantize(quantize)
-    else:
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True, device='cpu')
-
+    model = AutoModel.from_pretrained(model_name, trust_remote_code=True, local_files_only=True, device=app_settings.load_dev)
     return model.eval()
 
 copilot_tokenizer = AutoTokenizer.from_pretrained(
-    app_settings.private('COPILOT_MODEL'), trust_remote_code=True)
-copilot_model = device(
-    app_settings.private('COPILOT_MODEL'), int(app_settings.private('COPILOT_QUANTIZE')))
+    app_settings.models.copilot_name, trust_remote_code=True, local_files_only=True)
+copilot_model: chatglm_cpp.Pipeline = device(
+    app_settings.models.copilot_name, int(app_settings.models.copilot_quantize))
 copilot_model_stream = device(
-    app_settings.private('COPILOT_MODEL'), int(app_settings.private('COPILOT_QUANTIZE')), True)
+    app_settings.models.copilot_name, int(app_settings.models.copilot_quantize), True)
 
-class TaskArgs(BaseModel):
+class TaskParam(BaseModel):
     max_length  : int = 512   # maximum is 2048
     top_k       : int = 1
     top_p       : float = .95
     temperature : float = .2
 
-class TaskInfo(TaskArgs):
+class TaskInfo(TaskParam):
     lang   : str
     prompt : str
     html   : bool = False
@@ -73,12 +68,12 @@ async def create_copilot_task(task: TaskInfo) -> HTMLResponse | JSONResponse:
     if not app_settings.lang_tags.get(task.lang):
         lang_tag = ', '.join(app_settings.lang_tags)
         raise HTTPException(status_code=404, detail=f'Language Not Found, Try: [{lang_tag}]')
-    prompt = f'{app_settings.lang_tags[task.lang]}\n{CC.convert(task.prompt)}\n'
-    args = dict(TaskArgs(**dict(task)))
+    prompt, _ = copilot_prompt(app_settings.lang_tags, task.lang)
+    args = dict(TaskParam(**dict(task)))
     if enable_chatglm_cpp:
         response = copilot_model.generate(prompt, do_sample=task.temperature > 0, **args)
     else:
-        response = copilot_model.chat(copilot_tokenizer, prompt, **args)
+        response: Iterator[chatglm_cpp.DeltaMessage] | chatglm_cpp.ChatMessage = copilot_model.chat(copilot_tokenizer, prompt, **args)
     dt = (now := datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
     elapsed_time = (now - begin).total_seconds()
     resp = { "response": response, "lang": task.lang, "elapsed_time": elapsed_time, "datetime": dt }
@@ -89,22 +84,33 @@ async def create_copilot_task(task: TaskInfo) -> HTMLResponse | JSONResponse:
     return JSONResponse(status_code=200, content=resp)
 
 @router.websocket('/copilot/ws')
+@websocket_catch
 async def create_copilot_stream(
-    websocket: WebSocket,
-    lang: str,
-    prompt: str,
-    max_length: int = 256,
-    top_k: int = 1
+    websocket : WebSocket,
+    lang      : str,
+    prompt    : str,
+    max_length: int = 512,
+    top_k     : int = 1
 ):
     await websocket.accept()
-    load_device = 'cuda' if app_settings.load_dev == 'gpu' else 'cpu'
-    prompt = f'{app_settings.lang_tags[lang]}\n{CC.convert(prompt)}\n'
-    inputs = copilot_tokenizer.encode(prompt, return_tensors='pt').to(load_device)
+    prompt, comment_str = copilot_prompt(app_settings.lang_tags, lang, prompt)
+    encoding: Tensor = copilot_tokenizer.encode(prompt, return_tensors='pt')
+    inputs = encoding.to(app_settings.load_dev)
+    streaming: Generator[Tensor, None, None] = copilot_model_stream.stream_generate(inputs, max_length=max_length, top_k=top_k)
     while True:
-        streaming = await copilot_model_stream.stream_generate(inputs, max_length=max_length, top_k=top_k)
-        for outputs in streaming:
-            print(copilot_tokenizer.decode(outputs[0]))
+        origin_content = ''
+        for idx, outputs in enumerate(streaming):
+            content = copilot_tokenizer.decode(outputs[0])
+            if idx == 0:
+                origin_content = sub(r'\s|\n', '', content)
+            await websocket.send_text(content)
+            print(content)
+            await asleep(0.5)
+        if origin_content == sub(r'\s|\n', '', content):
+            await websocket.send_text(f'{content}\n{comment_str} I have done my best')
         await asleep(1)
+        await websocket.close()
+        break
 
 @router.get('/copilot/coding', response_class=HTMLResponse, include_in_schema=False)
 async def render_copilot_coding(request: Request) -> HTMLResponse:

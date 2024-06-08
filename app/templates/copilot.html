@@ -1,28 +1,104 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>Copilot</title>
+        <title>Copilot AI Coding</title>
     </head>
+    <style>
+        body {
+            background-color: #22272e;
+        }
+        .head {
+            color: aliceblue;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+        }
+        .message-box {
+            font-size: 20px;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            font-weight: 500;
+            color: lightskyblue;
+            background-color: #2d333b;
+            border-radius: 10px;
+            border: none;
+            margin: 20px 10px;
+            padding: 10px;
+            min-height: 80vh;
+        }
+        .input-box {
+            font-size: 16px;
+            font-weight: 500;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            color: lightslategray;
+            padding: 10px;
+            border-radius: 6px;
+            border-width: thin;
+            margin-left: 8px;
+            min-width: 200px;
+        }
+        .input-text {
+            width: 300px;
+        }
+        .selector {
+            color: blueviolet;
+            cursor: pointer;
+        }
+        .sender {
+            font-size: 15px;
+            font-weight: 500;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            padding: 10px;
+            background: skyblue;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            margin-left: 8px;
+            cursor: pointer;
+        }
+        .sender:hover {
+            opacity: .7;
+            color: rgb(244, 244, 244);
+        }
+    </style>
     <body>
-        <h1>Welcome Copilot AI Coding</h1>
+        <h1 class="head">Welcome Copilot AI Coding</h1>
         <form action="">
-            <input type="text" id="messageText" autocomplete="off"/>
-            <button id="sendButton" type="button" onclick="sendMessage(event)">提交信息</button>
+            <select class="input-box selector" id="lang">
+                <option value="" selected="selected">請指定程序語言</option>
+                <option value="Python">Python</option>
+                <option value="JavaScript">JavaScript</option>
+                <option value="Shell">Shell</option>
+            </select>
+            <input class="input-box input-text" type="text" id="prompt" placeholder="請描述幫您寫什麼樣的程序" autocomplete="off"/>
+            <button class="sender" id="sendButton" type="button" onclick="sendMessage(event)">提交</button>
         </form>
-        <ul id='messages'></ul>
+        <div class="message-box">
+            <code><pre id='messages' style="font-family: 'Verdana, Geneva, Tahoma, sans-serif';"></pre></code>
+        </div>
         <script>
-            var ws = new WebSocket("ws://172.17.1.243:7860/utils/copilot/ws");
-            ws.onmessage = function(event) {
-                var messages = document.getElementById('messages')
-                var message = document.createElement('li')
-                var content = document.createTextNode(event.data)
-                message.appendChild(content)
-                messages.appendChild(message)
-            };
-            function sendMessage(event) {
-                var input = document.getElementById("messageText")
-                ws.send(input.value)
-                input.value = ''
+            const createWs = (lang, prompt) => {
+                const ws = new WebSocket(`ws://${location.host}/ai/copilot/ws?lang=${lang}&prompt=${prompt}`)
+                ws.onmessage = function(event) {
+                    const messages = document.getElementById('messages')
+                    messages.innerHTML = event.data
+                }
+                ws.onclose = event => {
+                    document.getElementById('sendButton').disabled = false
+                    const messages = document.getElementById('messages')
+                    if (!messages.innerText.trim()) {
+                        return alert('服務失去連結！')
+                    }
+                    const doBest = messages.innerHTML.includes('I have done my best')
+                    return doBest ? alert('很抱歉沒能寫出代碼！我已經盡力了…') : confirm('程序生成完畢！')
+                }
+            }
+            const sendMessage = event => {
+                const lang = document.getElementById('lang').value
+                const prompt = document.getElementById('prompt').value
+                if (!lang || !prompt) {
+                    alert('請至少選擇一種語言，或幾句話來描述您的程序！')
+                    return
+                }
+                document.getElementById('sendButton').disabled = true
+                createWs(lang, prompt)
                 event.preventDefault()
             }
         </script>
