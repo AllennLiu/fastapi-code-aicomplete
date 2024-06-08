@@ -11,7 +11,8 @@
 
 ## 環境準備
 
-- 先 build **Docker** 鏡像 `ai-fastapi-copilot` *(使用 Docker 來避免環境依賴等問題)*
+- 本項目已經將已配置好的環境鏡像，推在 `Dockerhub` 上了：[seven6306/pretrained-model:ai-fastapi-copilot](https://hub.docker.com/repository/docker/seven6306/pretrained-model/tags)
+- 如果您要手動 Build **Docker** 鏡像 `ai-fastapi-copilot` *(使用 Docker 來避免環境依賴等問題)*
 
   ```bash
   docker build --no-cache -t seven6306/pretrained-model:ai-fastapi-copilot . \
@@ -68,7 +69,16 @@
   Pass
   ```
 
-  ![alt text](image.png)
+  ![api_demo](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/752d6d17-47a8-4c89-b31b-b03c962703fe)
+
+---
+
+## 效果演示
+
+- `AI` 依指定需求生成代碼
+
+  ![ai-coding](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/2978ffa4-e08b-41d7-882e-f83c7011453e)
+
 
 ---
 
