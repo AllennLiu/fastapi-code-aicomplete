@@ -63,6 +63,20 @@
             <button class="sender clear" id="clearButton" type="button">清除信息</button>
         </form>
         <div class="message-box"><ul id='messages'></ul></div>
+        <script type="module">
+            const helpMessages = async () => {
+                const response = await fetch(`http://${location.host}/chat/help`)
+                return await response.json()
+            }
+            const help = await helpMessages()
+            document.getElementById('messages').innerHTML = `
+            <li>
+                <span style="color: green; font-weight: 600;">机器人：</span>
+                <span>您好，可以问我任何的问题，也能调用下列 API 工具！</span>
+                <code><pre style="margin-block: 4px;">${JSON.stringify(help, null, 4)}</pre></code>
+            </li>
+            `
+        </script>
         <script>
             const now = new Date()
             const input = document.getElementById('messageText')

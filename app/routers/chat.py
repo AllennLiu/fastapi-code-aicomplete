@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse, HTMLResponse
 
 from ..toolkit import Tools
 from ..config import get_settings
-from ..utils import websocket_catch
+from ..utils import websocket_catch, tw_to_cn
 
 app_settings = get_settings()
 
@@ -48,6 +48,7 @@ def ignore_bad_words(content: str) -> str:
 
 def start_chat(conversation: Chatting) -> tuple[str, dict]:
     info = ChatInfo(**dict(conversation) | { "history": [ system_info ] })
+    info.query = tw_to_cn.convert(info.query)
     response, history = model.chat(tokenizer, **dict(info))
     return run_task(response, ChatInfo(**dict(info) | { "history": history }))
 
@@ -85,11 +86,11 @@ async def create_chat_conversation(conversation: Chatting) -> HTMLResponse | JSO
 
 @router.websocket('/ws')
 @websocket_catch
-async def create_copilot_stream(websocket: WebSocket):
+async def create_chat_stream(websocket: WebSocket):
     await websocket.accept()
     history: List[Dict[str, str]] = []
     while True:
-        content = await websocket.receive_text()
+        content = tw_to_cn.convert(await websocket.receive_text())
         streaming: Generator[tuple[str, List[Dict[str, str]]], None, None] = model.stream_chat(
             tokenizer, content, history, **dict(ChatParam()))
         for response, history in streaming:
@@ -101,6 +102,11 @@ async def create_copilot_stream(websocket: WebSocket):
         await asleep(1)
 
 @router.get('/demo', response_class=HTMLResponse, include_in_schema=False)
-async def render_copilot_demo(request: Request) -> HTMLResponse:
+async def render_chat_demo(request: Request) -> HTMLResponse:
     template = Jinja2Templates(directory='./app/templates')
     return template.TemplateResponse('chat.html', context={ "request": request })
+
+@router.get('/help')
+async def show_toolkit() -> JSONResponse:
+    resp = [ { tool["description"]: tool["parameters"] } for tool in Tools.tools ]
+    return JSONResponse(status_code=200, content=resp)
