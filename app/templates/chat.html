@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>ChatBot</title>
+    </head>
+    <style>
+        body {
+            background-color: #22272e;
+        }
+        .head {
+            color: aliceblue;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+        }
+        .message-box {
+            font-size: 20px;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            font-weight: 500;
+            color: lightskyblue;
+            background-color: #2d333b;
+            border-radius: 10px;
+            border: none;
+            margin: 20px 10px;
+            padding: 10px;
+            min-height: 80vh;
+        }
+        .input-box {
+            font-size: 16px;
+            font-weight: 500;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            color: lightslategray;
+            padding: 10px;
+            border-radius: 6px;
+            border-width: thin;
+            min-width: 200px;
+            width: 300px;
+            margin-left: 8px;
+        }
+        .sender {
+            font-size: 15px;
+            font-weight: 500;
+            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            padding: 10px;
+            background: skyblue;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            margin-left: 8px;
+            cursor: pointer;
+        }
+        .clear {
+            background: indianred;
+        }
+        .sender:hover {
+            opacity: .7;
+            color: rgb(244, 244, 244);
+        }
+    </style>
+    <body>
+        <h1 class="head">Welcome ChatBot</h1>
+        <form action="">
+            <input class="input-box" type="text" id="messageText" autocomplete="off" required/>
+            <button class="sender" id="sendButton" type="button" onclick="sendMessage(event)">提交信息</button>
+            <button class="sender clear" id="clearButton" type="button">清除信息</button>
+        </form>
+        <div class="message-box"><ul id='messages'></ul></div>
+        <script>
+            const now = new Date()
+            const input = document.getElementById('messageText')
+            const messages = document.getElementById('messages')
+            const sender = document.getElementById('sendButton')
+            const tidyup = document.getElementById('clearButton')
+            const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+            tidyup.addEventListener('click', _event => {
+                if (messages.innerHTML.trim() === '') return
+                if (confirm('请问是否要清除对话纪录？')) messages.innerHTML = ''
+            })
+            input.addEventListener('keydown', event => {
+                if (event.keyCode === 13) return event.preventDefault()
+            })
+            const creatWs = () => {
+                const ws = new WebSocket(`ws://${location.host}/chat/ws`)
+                ws.onmessage = event => {
+                    const resp = JSON.parse(event.data)
+                    const content = Array.from(messages.querySelectorAll('span')).pop()
+                    content.innerHTML = `<span>${resp.content.replace(/(?:\r\n|\r|\n)/g, '<br>')}</span>`
+                    if (resp.completion === true) {
+                        input.disabled = false
+                        sender.disabled = false
+                        window.scrollTo(0, document.body.scrollHeight)
+                    }
+                }
+                return ws
+            }
+            const ws = creatWs()
+            const sendMessage = event => {
+                if (input.value.trim() === '') return
+                const userMessage = document.createElement('li')
+                const botMessage = document.createElement('li')
+                const user = document.createElement('span')
+                const assistant = document.createElement('span')
+                const content = document.createTextNode(input.value)
+                user.innerHTML = '<span style="color: blue; font-weight: 600;">使用者：</span>'
+                assistant.innerHTML = '<span style="color: green; font-weight: 600;">机器人：</span><span>…</span>'
+                ws.send(input.value)
+                input.value = ''
+                userMessage.appendChild(user)
+                userMessage.appendChild(content)
+                botMessage.appendChild(assistant)
+                messages.appendChild(userMessage)
+                messages.appendChild(botMessage)
+                input.disabled = true
+                sender.disabled = true
+                event.preventDefault()
+            }
+        </script>
+    </body>
+</html>

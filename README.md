@@ -9,18 +9,20 @@
 
 ---
 
-## 🎥 效果演示
+## 🎥 效果演示 *(Stream)*
 
-- `AI` 依指定需求生成代碼 🔗 http://127.0.0.1:7860/ai/copilot/coding
+- `AI` 依指定需求生成代碼 🔗 http://127.0.0.1:7860/copilot/coding/demo
 
   ![ai-coding](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/2978ffa4-e08b-41d7-882e-f83c7011453e)
+
+- 聊天機器人互動 🤖 http://127.0.0.1:7860/chat/demo
 
 ---
 
 ## 🌐 環境準備
 
 - 本項目已經將已配置好的環境鏡像，推在 `Dockerhub` 上了，**大小 `27G`** *(內含已載入的量化 `CodeGeeX2-6B` + `ChatGLM3-6B` 模型)*
-- 鏡像連結：[seven6306/pretrained-model:ai-fastapi-copilot](https://hub.docker.com/repository/docker/seven6306/pretrained-model/tags)
+- 鏡像連結 🔗 [seven6306/pretrained-model:ai-fastapi-copilot](https://hub.docker.com/repository/docker/seven6306/pretrained-model/tags)
 - 如果您要手動 Build **Docker** 鏡像 `ai-fastapi-copilot` *(使用 Docker 來避免環境依賴等問題)*
 
   ```bash
@@ -41,35 +43,29 @@
   docker run -tid -p 7861:22 -p 7860:7860 \
     --gpus all \
     -e "LOAD_MODEL_DEVICE=gpu" \
-    -v /etc/timezone:/etc/timezone:ro \
     -v /etc/localtime:/etc/localtime:ro \
     -v /root/.ssh:/root/.ssh:ro \
     --ulimit nofile=65535 --privileged=true --restart=always \
     --name copilot seven6306/pretrained-model:ai-fastapi-copilot
   ```
 
-- 生成第一個 `Python` 腳本 *(沒有 `jq` 工具的話，需自行將 response 文本貼在腳本中)*
-  <br>如果在 **Request Body** 多添加參數 **`, "html": true`**，可以直接返回 `HTML` 代碼文本
+---
+
+> 在 **`FastAPI` Docs** 下玩玩 http://127.0.0.1:7860/docs
+
+#### ✍️ 代碼生成
+
+- 生成第一個 `Python` 腳本，在 **Request Body** 使用參數 **`, "html": true`**，可以直接返回 `HTML` 代碼文本
 
   ```bash
-  curl -sX POST http://172.17.1.243:7860/ai/copilot \
+  curl -sX POST http://127.0.0.1:7860/copilot/coding \
     -H 'Content-Type: application/json'\
-    -d '{ "lang": "Python", "prompt": "寫一個程序執行命令 ipmitool raw 6 1 判斷 00 在返回值中打印 Pass 不在就打印 Fail" }' | jq -r .response | tee test.py
+    -d '{ "lang": "Python", "prompt": "寫一個程序執行命令 ipmitool raw 6 1 判斷 00 在返回值中打印 Pass 不在就打印 Fail", "html": true }' | python
   ```
 
-  ```bash
-  {
-      "response": "\n\nimport os\nimport sys\n\n\ndef run_cmd(cmd):\n    p = os.popen(cmd)\n    return p.read()\n\n\ndef get_status(cmd):\n    p = os.popen(cmd)\n    return p.read()\n\n\ndef get_status_code(cmd):\n    p = os.popen(cmd)\n    return p.read()\n\n\nif __name__ == \"__main__\":\n    cmd = \"ipmitool raw 6 1\"\n    cmd_status = \"ipmitool raw 6 1 | grep '00'\"\n    cmd_status_code = \"ipmitool raw 6 1 | grep '00' | wc -l\"\n\n    print(run_cmd(cmd))\n    print(get_status(cmd_status))\n    print(get_status_code(cmd_status_code))\n\n    if \"00\" in get_status(cmd_status):\n        print(\"Pass\")\n    else:\n        print(\"Fail\")\n\n\n\"\"\"\nipmitool raw 6 1 | grep '00'\nipmitool raw 6 1 | grep '00' | w\n\"\"\"",
-      "lang": "Python",
-      "elapsed_time": 22.534089,
-      "datetime": "2024-06-07 05:45:26"
-  }
-  ```
-
-- 可以正常執行 AI 生成的 `Python` 腳本並符合預期！
+- 可以正常執行 **AI** 生成的 `Python` 腳本並符合預期！
 
   ```bash
-  root@debian:~# python test.py
   20 00 02 12 02 8d dd b3 00 18 00 00 00 00 00
 
   20 00 02 12 02 8d dd b3 00 18 00 00 00 00 00
@@ -80,6 +76,38 @@
   ```
 
   ![api_demo](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/752d6d17-47a8-4c89-b31b-b03c962703fe)
+
+---
+
+#### 💬 聊天機器人
+
+- 進行聊天
+
+  ```bash
+  curl -X POST http://127.0.0.1:7860/chat/conversation \
+    -H 'Content-Type: application/json' -d '{ "query": "你最近還好嗎?" }'
+  ```
+
+  ```json
+  {
+    "response": "我很好，谢谢。你呢？",
+    "history": [
+      {
+        "role": "user",
+        "content": "你最近還好嗎?"
+      },
+      {
+        "role": "assistant",
+        "metadata": "",
+        "content": "我很好，谢谢。你呢？"
+      }
+    ],
+    "datetime": "2024-06-14 05:40:02",
+    "elapsed_time": 1191.721331
+  }
+  ```
+
+- 在 **Request Body** 通過每次對話返回的 `history`，來傳入參數 **`, "history": [ ... ]`** 可進行**多輪式對話**。
 
 ---
 

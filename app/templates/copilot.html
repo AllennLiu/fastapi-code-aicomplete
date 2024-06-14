@@ -75,7 +75,7 @@
         </div>
         <script>
             const createWs = (lang, prompt) => {
-                const ws = new WebSocket(`ws://${location.host}/ai/copilot/ws?lang=${lang}&prompt=${prompt}`)
+                const ws = new WebSocket(`ws://${location.host}/copilot/coding/ws?lang=${lang}&prompt=${prompt}`)
                 ws.onmessage = function(event) {
                     const messages = document.getElementById('messages')
                     messages.innerHTML = event.data

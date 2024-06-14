@@ -1,4 +1,4 @@
-from re import sub
+import re
 from torch import Tensor
 from datetime import datetime
 from pydantic import BaseModel
@@ -25,10 +25,11 @@ except:
 app_settings = get_settings()
 
 router = APIRouter(
-    prefix    = '/ai',
-    tags      = [ 'AI' ],
+    prefix    = '/copilot',
+    tags      = [ 'Copilot' ],
     responses = { 404: { "description": "Not found" } }
 )
+pretrained_args = { "trust_remote_code": True, "local_files_only": True, "device": app_settings.load_dev }
 
 def device(model_name: str, quantize: int, use_stream: bool = False) -> chatglm_cpp.Pipeline:
     if not use_stream:
@@ -41,49 +42,57 @@ def device(model_name: str, quantize: int, use_stream: bool = False) -> chatglm_
             return model
         print('chatglm-cpp not enabled, falling back to transformers')
 
-    model = AutoModel.from_pretrained(model_name, trust_remote_code=True, local_files_only=True, device=app_settings.load_dev)
+    model = AutoModel.from_pretrained(model_name, **pretrained_args)
     return model.eval()
 
-copilot_tokenizer = AutoTokenizer.from_pretrained(
-    app_settings.models.copilot_name, trust_remote_code=True, local_files_only=True)
-copilot_model: chatglm_cpp.Pipeline = device(
+tokenizer = AutoTokenizer.from_pretrained(app_settings.models.copilot_name, **pretrained_args)
+model: chatglm_cpp.Pipeline = device(
     app_settings.models.copilot_name, int(app_settings.models.copilot_quantize))
-copilot_model_stream = device(
+model_stream = device(
     app_settings.models.copilot_name, int(app_settings.models.copilot_quantize), True)
 
-class TaskParam(BaseModel):
-    max_length  : int = 512   # maximum is 2048
-    top_k       : int = 1
+class CodingParam(BaseModel):
+    max_length  : int   = 512   # maximum is 2048
+    top_k       : int   = 1
     top_p       : float = .95
     temperature : float = .2
 
-class TaskInfo(TaskParam):
+class Coding(CodingParam):
     lang   : str
     prompt : str
     html   : bool = False
 
-@router.post('/copilot', response_model=None)
-async def create_copilot_task(task: TaskInfo) -> HTMLResponse | JSONResponse:
+@router.post('/coding', response_model=None)
+async def create_copilot_task(task: Coding) -> HTMLResponse | JSONResponse:
+    """
+    Create an AI programming process like copilot assistant:
+
+    - **lang**: programming language, such as: [Python, JavaScript, Shell]
+    - **prompt**: describe program requirement
+    - **html**: response to HTML context
+    """
     begin = datetime.now()
     if not app_settings.lang_tags.get(task.lang):
         lang_tag = ', '.join(app_settings.lang_tags)
         raise HTTPException(status_code=404, detail=f'Language Not Found, Try: [{lang_tag}]')
     prompt, _ = copilot_prompt(app_settings.lang_tags, task.lang)
-    args = dict(TaskParam(**dict(task)))
+    args = dict(CodingParam(**dict(task)))
     if enable_chatglm_cpp:
-        response = copilot_model.generate(prompt, do_sample=task.temperature > 0, **args)
+        response = model.generate(prompt, do_sample=task.temperature > 0, **args)
     else:
-        response: Iterator[chatglm_cpp.DeltaMessage] | chatglm_cpp.ChatMessage = copilot_model.chat(copilot_tokenizer, prompt, **args)
-    dt = (now := datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-    elapsed_time = (now - begin).total_seconds()
-    resp = { "response": response, "lang": task.lang, "elapsed_time": elapsed_time, "datetime": dt }
-    print(f'[{dt}] ", prompt: "{prompt}", response: "{repr(response)}"')
+        response: Iterator[chatglm_cpp.DeltaMessage] | chatglm_cpp.ChatMessage = model.chat(tokenizer, prompt, **args)
+    resp = {
+        "response"    : response,
+        "lang"        : task.lang,
+        "datetime"    : (now := datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
+        "elapsed_time": (now - begin).total_seconds()
+    }
     if task.html:
         _prompt = prompt.replace('\n', ' ')
         return HTMLResponse(status_code=200, content=f'{_prompt}\n{response}')
     return JSONResponse(status_code=200, content=resp)
 
-@router.websocket('/copilot/ws')
+@router.websocket('/coding/ws')
 @websocket_catch
 async def create_copilot_stream(
     websocket : WebSocket,
@@ -94,25 +103,25 @@ async def create_copilot_stream(
 ):
     await websocket.accept()
     prompt, comment_str = copilot_prompt(app_settings.lang_tags, lang, prompt)
-    encoding: Tensor = copilot_tokenizer.encode(prompt, return_tensors='pt')
+    encoding: Tensor = tokenizer.encode(prompt, return_tensors='pt')
     inputs = encoding.to(app_settings.load_dev)
-    streaming: Generator[Tensor, None, None] = copilot_model_stream.stream_generate(inputs, max_length=max_length, top_k=top_k)
+    streaming: Generator[Tensor, None, None] = model_stream.stream_generate(inputs, max_length=max_length, top_k=top_k)
     while True:
         origin_content = ''
         for idx, outputs in enumerate(streaming):
-            content = copilot_tokenizer.decode(outputs[0])
+            content = tokenizer.decode(outputs[0])
             if idx == 0:
-                origin_content = sub(r'\s|\n', '', content)
+                origin_content = re.sub(r'\s|\n', '', content)
             await websocket.send_text(content)
             print(content)
-            await asleep(0.5)
-        if origin_content == sub(r'\s|\n', '', content):
+            await asleep(0.1)
+        if origin_content == re.sub(r'\s|\n', '', content):
             await websocket.send_text(f'{content}\n{comment_str} I have done my best')
         await asleep(1)
         await websocket.close()
         break
 
-@router.get('/copilot/coding', response_class=HTMLResponse, include_in_schema=False)
-async def render_copilot_coding(request: Request) -> HTMLResponse:
+@router.get('/coding/demo', response_class=HTMLResponse, include_in_schema=False)
+async def render_copilot_demo(request: Request) -> HTMLResponse:
     template = Jinja2Templates(directory='./app/templates')
     return template.TemplateResponse('copilot.html', context={ "request": request })

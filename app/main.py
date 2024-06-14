@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import ai
 from .config import get_settings
+from .routers import chat, copilot
 
 app_settings = get_settings()
 app = FastAPI(
@@ -17,4 +17,5 @@ app.add_middleware(
     allow_headers=[ "*" ],
     allow_credentials=True)
 
-app.include_router(ai.router)
+app.include_router(chat.router)
+app.include_router(copilot.router)
