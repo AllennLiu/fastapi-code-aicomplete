@@ -56,7 +56,7 @@ function server_forever
 function main
 {
     config_sshd
-    uvicorn app.main:app --host $SERVE_HOST --port $SERVE_PORT --workers 4 --timeout-keep-alive 300
+    uvicorn app.main:app --host $SERVE_HOST --port $SERVE_PORT --workers 2 --timeout-keep-alive 300
     exit 0
 }
 

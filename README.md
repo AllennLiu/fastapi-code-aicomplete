@@ -18,7 +18,7 @@
 
 ### 🤖 與聊天機器人互動 🔗 http://127.0.0.1:7860/chat/demo
 
-![chat_x16_x10](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/42f70fbc-1a14-428a-b34b-1d436f11d35a)
+![chat_x16_x10_x2](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/79fc7243-9d4c-4ce1-bab1-2de5d97e3c98)
 
 ---
 
