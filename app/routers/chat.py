@@ -65,12 +65,12 @@ def run_task(response: str | dict, param: ChatInfo) -> tuple[str, dict]:
 @router.post('/conversation', response_model=None, response_description='Conversation info')
 async def create_chat_conversation(conversation: Chatting) -> HTMLResponse | JSONResponse:
     """
-    Create an AI chat conversation:
+    Create an **AI chat conversation** for single round:
 
-    - **query**: message content
-    - **history**: conversation history list
-    - **role**: chat role could be: [user, assistant, system, observation]
-    - **html**: response to HTML context
+    - **query**: message content by user
+    - **history**: conversation history list for assistant reference
+    - **role**: chat role could be: `[user, assistant, system, observation]`
+    - **html**: response to `HTML` context directly
     """
     begin = datetime.now()
     response, history = start_chat(conversation)

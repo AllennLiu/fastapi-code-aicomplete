@@ -65,11 +65,11 @@ class Coding(CodingParam):
 @router.post('/coding', response_model=None)
 async def create_copilot_task(task: Coding) -> HTMLResponse | JSONResponse:
     """
-    Create an AI programming process like copilot assistant:
+    Create an **AI programming** process like `Github Copilot` assistant:
 
-    - **lang**: programming language, such as: [Python, JavaScript, Shell]
-    - **prompt**: describe program requirement
-    - **html**: response to HTML context
+    - **lang**: programming language, such as: `[Python, JavaScript, Shell, ...]`
+    - **prompt**: describe program detail
+    - **html**: response to `HTML` context directly
     """
     begin = datetime.now()
     if not app_settings.lang_tags.get(task.lang):
