@@ -162,4 +162,4 @@ Fri Jun  7 21:06:49 2024
 
 - https://github.com/THUDM/CodeGeeX2
 - https://github.com/li-plus/chatglm.cpp
-- https://github.com/THUDM/ChatGLM3/tree/main
+- https://github.com/THUDM/ChatGLM3

@@ -1,14 +1,23 @@
+from typing import Any, AsyncIterator
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .utils import ML, device
 from .config import get_settings
 from .routers import chat, copilot
 
-app_settings = get_settings()
-app = FastAPI(
-    title        = app_settings.app_name,
-    description  = app_settings.desc,
-)
+settings = get_settings()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[Any]:
+    param = dict(quantize=int(settings.models.quantize), device=settings.load_dev)
+    app.chat = ML(*device(settings.models.chatbot_name, quantize=8, device=settings.load_dev))
+    app.copilot = ML(*device(settings.models.copilot_name, dtype=settings.models.dtype, **param))
+    yield
+    del app.chat, app.copilot
+
+app = FastAPI(title=settings.app_name, description=settings.desc, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

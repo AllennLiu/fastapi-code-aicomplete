@@ -1,52 +1,104 @@
-from typing import Dict
-from textwrap import dedent
+import json, random, textwrap, traceback, requests
+from chatglm_cpp import ChatMessage
+from typing import Any, Dict, Callable
 
 class Tools:
     tools = [
         {
-            "name"       : "get_current_weather_by_location",
-            "description": "根据城市获取当前天气",
+            "name"       : "code_helper",
+            "description": "调用 code_helper 工具，程序语言是 xxx，提示是 xxx 功能",
             "parameters" : {
                 "type"      : "object",
-                "properties": { "location": { "description": "城市名称 e.g. 北京，上海，武汉" } },
-                "required"  : [ 'location' ]
+                "properties": {
+                    "language": { "description": "程序语言 e.g. Python，Shell", "type": "string" },
+                    "prompt"  : { "description": "提示要实现的功能", "type": "string" }
+                },
+                "required"  : [ 'language', 'prompt' ]
             }
         },
         {
-            "name"       : "get_news_about_birthday",
-            "description": "获取生日庆祝相关的新闻文章",
-            "parameters" : {}
+            "name"       : "get_weather",
+            "description": "根据城市获取当前天气",
+            "parameters" : {
+                "type"      : "object",
+                "properties": { "city_name": { "description": "城市名称 e.g. 北京，上海", "type": "string" } },
+                "required"  : [ 'city_name' ]
+            }
+        },
+        {
+            "name": "random_number_generator",
+            "description": "生成随机数字 x, s.t. range[0] <= x < range[1]",
+            "parameters": {
+                "type"      : "object",
+                "properties": {
+                    "seed": {
+                        "description": "随机数作为对象的以真随机数（种子）为初始条件的随机数",
+                        "type"       : "integer"
+                    },
+                    "range": {
+                        "description": "生成数字的范围区间",
+                        "type"       : "array",
+                        "items"      : [ { "type": "integer" }, { "type": "integer" } ],
+                    },
+                },
+                "required": [ 'seed', 'range' ],
+            }
         }
     ]
 
     @staticmethod
-    def get_current_weather_by_location(location: str) -> Dict[str, str]:
-        """根据城市获取当前天气"""
-        print("天气函数被调用了")
-        if location == "北京":
-            return {
-                "location": location,
-                "temp": "24",
-                "text": "多云",
-                "windDir": "东南风",
-                "windScale": "1"
-            }
-        elif location == "武汉":
-            return {
-                "location": location,
-                "temp": "26",
-                "text": "晴",
-                "windDir": "西北风",
-                "windScale": "2"
-            }
+    def code_helper(language: str, prompt: str) -> str:
+        print('代码生成接口被调用！')
+        url = 'http://172.17.1.243:7862/copilot/coding'
+        headers = { "Content-Type": "application/json" }
+        data = {
+            "max_length": 512,
+            "top_k": 1,
+            "top_p": 0.95,
+            "temperature": 0.2,
+            "lang": language.capitalize(),
+            "prompt": prompt, "html": False
+        }
+        print(f'posting {url}')
+        resp = requests.post(url, headers=headers, data=json.dumps(data), verify=False)
+        resp.raise_for_status()
+        print(resp.json())
+        return json.dumps(resp.json())
 
     @staticmethod
-    def get_news_about_birthday() -> Dict[str, str]:
-        """获取生日庆祝相关的新闻文章"""
-        return {
-            "content": dedent("""\
-                参加朋友的生日会，你也一起出主意、构想庆祝内容，是不是会更有参与感、更难忘？
-                学前儿童刊物《小小拇指》为庆祝创刊10周年，将在6月至8月的巡回展上，举办多场免费的华语讲故事活动。这次讲故事活动的最大特色是将以参与式剧场的形式，带领孩童和家长一同参加“小拇指的生日会”。这种形式鼓励参与者积极发挥创意、贡献点子，每个人都是故事的创建者，参与越多，融入感就越强。
-                主讲者符妙娟（39岁，戏剧工作者）与同伴林慈暄（协助执行）用了一个月的时间，构思故事脚本和互动方式。故事带领小朋友回顾10年来《小小拇指》的重要内容，比如认识新加坡、各种新鲜趣闻，以及朗朗上口的本土儿歌，过程中会穿插各种想法交流和亲自动手的环节。
-                """)
-        }
+    def get_weather(city_name: str) -> str:
+        """根据城市获取当前天气"""
+        keys = { "current_condition": [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ] }
+        resp = requests.get(f'https://wttr.in/{city_name}?format=j1')
+        resp.raise_for_status()
+        resp: dict = resp.json()
+        return json.dumps({ k: { _v: resp[k][0][_v] for _v in keys[k] } for k in keys })
+
+    @staticmethod
+    def random_number_generator(seed: int, range: tuple[int, int]) -> int:
+        """生成随机数字"""
+        return random.Random(seed).randint(*range)
+
+OBSERVATION_MAX_LENGTH = 1024
+TOOL_SYSTEM_PROMPT = ChatMessage(role='system', content=textwrap.dedent(f"""\
+Answer the following questions as best as you can. You have access to the following tools:
+{json.dumps(Tools.tools, ensure_ascii=False, indent=4)}\
+"""))
+
+def run_function(name: str, arguments: str) -> str:
+    """Run `observation` mode by assistant which is passing function
+    name and arguments, finally return the stringify dict response.
+    """
+    def tool_call(**kwargs: Any) -> Dict[str, Any]:
+        return kwargs
+    func: Callable[..., Any] = getattr(Tools, name)
+    if func is None:
+        return f'Function `{name}` is not defined'
+    try:
+        kwargs = eval(arguments, dict(tool_call=tool_call))
+    except Exception:
+        return f'Invalid arguments {arguments}'
+    try:
+        return str(func(**kwargs))
+    except Exception:
+        return traceback.format_exc()

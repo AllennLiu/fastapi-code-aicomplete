@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>ChatBot</title>
+        <link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
+        <title>💬 ChatBot</title>
     </head>
     <style>
         body {
@@ -71,9 +72,12 @@
             const help = await helpMessages()
             document.getElementById('messages').innerHTML = `
             <li>
-                <span style="color: green; font-weight: 600;">机器人：</span>
-                <span>您好，可以问我任何的问题，也能调用下列 API 工具！</span>
+                <span style="color: green; font-weight: 600;">🤖：</span>
+                <span>您好，欢迎问我任何问题，我会尽可能回答！</span>
+                <!--
+                <span>您好，可以问我任何问题，或尽可能描述与下列接近的句子来调用 API 工具！</span>
                 <code><pre style="margin-block: 4px;">${JSON.stringify(help, null, 4)}</pre></code>
+                -->
             </li>
             `
         </script>
@@ -84,23 +88,21 @@
             const sender = document.getElementById('sendButton')
             const tidyup = document.getElementById('clearButton')
             const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-            tidyup.addEventListener('click', _event => {
+            tidyup.addEventListener('click', event => {
                 if (messages.innerHTML.trim() === '') return
                 if (confirm('请问是否要清除对话纪录？')) messages.innerHTML = ''
             })
-            input.addEventListener('keydown', event => {
-                if (event.keyCode === 13) return event.preventDefault()
-            })
+            input.addEventListener('keydown', event => event.keyCode === 13 && sendMessage(event))
             const creatWs = () => {
                 const ws = new WebSocket(`ws://${location.host}/chat/ws`)
                 ws.onmessage = event => {
                     const resp = JSON.parse(event.data)
                     const content = Array.from(messages.querySelectorAll('span')).pop()
                     content.innerHTML = `<span>${resp.content.replace(/(?:\r\n|\r|\n)/g, '<br>')}</span>`
+                    window.scrollTo(0, document.body.scrollHeight)
                     if (resp.completion === true) {
                         input.disabled = false
                         sender.disabled = false
-                        window.scrollTo(0, document.body.scrollHeight)
                     }
                 }
                 return ws
@@ -112,18 +114,21 @@
                 const botMessage = document.createElement('li')
                 const user = document.createElement('span')
                 const assistant = document.createElement('span')
-                const content = document.createTextNode(input.value)
-                user.innerHTML = '<span style="color: blue; font-weight: 600;">使用者：</span>'
-                assistant.innerHTML = '<span style="color: green; font-weight: 600;">机器人：</span><span>…</span>'
+                const userText = document.createElement('span')
+                userText.style.color = 'burlywood'
+                userText.innerText = input.value
+                user.innerHTML = '<span style="color: blue; font-weight: 600;">🦲：</span>'
+                assistant.innerHTML = '<span style="color: green; font-weight: 600;">🤖：</span><span>…</span>'
                 ws.send(input.value)
                 input.value = ''
                 userMessage.appendChild(user)
-                userMessage.appendChild(content)
+                userMessage.appendChild(userText)
                 botMessage.appendChild(assistant)
                 messages.appendChild(userMessage)
                 messages.appendChild(botMessage)
                 input.disabled = true
                 sender.disabled = true
+                window.scrollTo(0, document.body.scrollHeight)
                 event.preventDefault()
             }
         </script>

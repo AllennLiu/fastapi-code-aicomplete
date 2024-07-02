@@ -1,5 +1,6 @@
 import os
 from typing import Dict
+from textwrap import dedent
 from functools import lru_cache
 from starlette.config import Config
 from pydantic_settings import BaseSettings
@@ -74,18 +75,40 @@ LANGUAGE_TAG: Dict[str, str] = {
     "Visual Basic" : "' language: Visual Basic"
 }
 DOTENV_CONFIG = os.path.join('app', '.env')
+HUB_PATH = '/root/.cache/huggingface/hub'
+
+class Database(BaseSettings):
+    redis: str = '10.99.104.250:6379'
 
 class ModelConfig(BaseSettings):
-    chatbot_name     : str = 'THUDM/chatglm3-6b'
-    copilot_name     : str = 'THUDM/codegeex2-6b'
-    copilot_quantize : int = 4
+    chatbot_name : str = '/workspace/glm-4-9b-chat'
+    copilot_name : str = '/workspace/codegeex2-6b'
+    quantize     : int = 10
+    dtype        : str = 'f16'
 
 class Settings(BaseSettings):
-    app_name  : str = 'Code AI Complete API'
-    desc      : str = 'Integrating `CodeGeeX2-6B` + `ChatGLM3-6` model to make the World more friendly.'
+    app_name  : str = 'Powerful API with 🇦🇮 🤖'
+    desc      : str = dedent("""\
+        Integrating as following **`LLM`** models to implement **Useful API** to community:
+
+        - **`CodeGeeX2-6B`** 🔗 [https://github.com/THUDM/CodeGeeX2](https://github.com/THUDM/CodeGeeX2)
+        - **`GLM-4-9B-Chat`** 🔗 [https://github.com/THUDM/GLM-4](https://github.com/THUDM/GLM-4)
+
+        You could download these models from [Hugging Face](https://huggingface.co/THUDM) 🤗
+
+        ## 🚀 Quick Start
+
+        See following our **🎥 DEMO Web 🌐** pages for more experience with `🇦🇮`:
+
+        - 💬 **Chatbot 🇦🇮** 🔗 [/chat/demo](/chat/demo)
+        - 👩‍💻 **Coding Assistant** 🔗 [/copilot/coding/demo](/copilot/coding/demo)
+
+        #### 🎮 Just enjoy it !\
+        """)
     lang_tags : Dict[str, str] = LANGUAGE_TAG
     private   : Config = Config(DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None)
     models    : ModelConfig = ModelConfig()
+    db        : Database = Database()
     load_dev  : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
 
 @lru_cache

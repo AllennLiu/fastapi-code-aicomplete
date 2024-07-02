@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>Copilot AI Coding</title>
+        <link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
+        <title>👩‍💻 AI Coding</title>
     </head>
     <style>
         body {
@@ -59,13 +60,10 @@
         }
     </style>
     <body>
-        <h1 class="head">Welcome Copilot AI Coding</h1>
+        <h1 class="head">Welcome AI Coding</h1>
         <form action="">
             <select class="input-box selector" id="lang">
                 <option value="" selected="selected">请指定程序语言</option>
-                <option value="Python">Python</option>
-                <option value="JavaScript">JavaScript</option>
-                <option value="Shell">Shell</option>
             </select>
             <input class="input-box input-text" type="text" id="prompt" placeholder="请描述帮您写什么样的程序" autocomplete="off"/>
             <button class="sender" id="sendButton" type="button" onclick="sendMessage(event)">提交</button>
@@ -73,12 +71,27 @@
         <div class="message-box">
             <code><pre id='messages' style="font-family: 'Verdana, Geneva, Tahoma, sans-serif';"></pre></code>
         </div>
+        <script type="module">
+            const supportLangs = async () => {
+                const response = await fetch(`http://${location.host}/copilot/coding/langs`)
+                return await response.json()
+            }
+            const langs = await supportLangs()
+            const langSelector = document.getElementById('lang')
+            Object.keys(langs).forEach(e => {
+                const option = document.createElement('option')
+                option.text = e
+                option.value = e
+                langSelector.appendChild(option)
+            })
+        </script>
         <script>
             const createWs = (lang, prompt) => {
                 const ws = new WebSocket(`ws://${location.host}/copilot/coding/ws?lang=${lang}&prompt=${prompt}`)
                 ws.onmessage = function(event) {
                     const messages = document.getElementById('messages')
                     messages.innerHTML = event.data
+                    window.scrollTo(0, document.body.scrollHeight)
                 }
                 ws.onclose = event => {
                     document.getElementById('sendButton').disabled = false

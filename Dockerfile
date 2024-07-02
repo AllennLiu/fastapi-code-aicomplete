@@ -6,17 +6,17 @@ ENV NODE_SOURCE /workspace
 
 RUN rm -rf $NODE_SOURCE/*
 
+RUN rm -rf /root/.cache/huggingface/hub/models*
+
 COPY . $NODE_SOURCE
 
 WORKDIR $NODE_SOURCE
 
-RUN date && apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gcc g++ make vim curl git jq \
-        ssh sshpass plink telnet unzip tmux
+RUN apt update -y && apt install -yq gcc g++ make cmake vim curl git jq ssh sshpass plink telnet unzip tmux
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt || true
+RUN date && conda update --all
+
+RUN pip install --no-cache-dir -U pip && pip install --no-cache-dir -r requirements.txt || true
 
 RUN echo 'alias vi="vim"' >> ~/.bashrc
 

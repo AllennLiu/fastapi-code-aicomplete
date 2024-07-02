@@ -22,7 +22,8 @@ Usage: $0 [Option] argv
 FastAPI backend service manager.
 
 Options:
-  -s, --ssh       serve with SSH server only
+    -s, --ssh              serve with SSH server only
+    --kill, --terminate    terminate existing web process immediately
 
 EOF
     exit 0
@@ -56,7 +57,8 @@ function server_forever
 function main
 {
     config_sshd
-    uvicorn app.main:app --host $SERVE_HOST --port $SERVE_PORT --workers 2 --timeout-keep-alive 300
+    gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT -t 300 \
+        --worker-connections 1 --reload -w 4 -k uvicorn.workers.UvicornWorker
     exit 0
 }
 
@@ -70,6 +72,10 @@ do
         -s|--ssh)
             config_sshd
             server_forever
+            ;;
+        --kill|--terminate)
+            ps -ef | grep -v grep | grep -E "$0|uvicorn" | awk '{print $2}' | grep -vE '^1$' | xargs -i kill -9 {}
+            exit 0
             ;;
         * ) echo "Invalid arguments, try '-h/--help' for more information."
             exit 1
