@@ -65,15 +65,15 @@
             <select class="input-box selector" id="lang">
                 <option value="" selected="selected">请指定程序语言</option>
             </select>
-            <input class="input-box input-text" type="text" id="prompt" placeholder="请描述帮您写什么样的程序" autocomplete="off"/>
+            <input class="input-box input-text" type="text" id="prompt" placeholder="请描述帮您写什么样的程序，建议限制字数" autocomplete="off"/>
             <button class="sender" id="sendButton" type="button" onclick="sendMessage(event)">提交</button>
         </form>
         <div class="message-box">
-            <code><pre id='messages' style="font-family: 'Verdana, Geneva, Tahoma, sans-serif';"></pre></code>
+            <code><pre style="font-family: 'Verdana, Geneva, Tahoma, sans-serif';"></pre></code>
         </div>
         <script type="module">
             const supportLangs = async () => {
-                const response = await fetch(`http://${location.host}/copilot/coding/langs`)
+                const response = await fetch(`http://${location.host}/copilot/langs`)
                 return await response.json()
             }
             const langs = await supportLangs()
@@ -86,32 +86,37 @@
             })
         </script>
         <script>
-            const createWs = (lang, prompt) => {
-                const ws = new WebSocket(`ws://${location.host}/copilot/coding/ws?lang=${lang}&prompt=${prompt}`)
-                ws.onmessage = function(event) {
-                    const messages = document.getElementById('messages')
-                    messages.innerHTML = event.data
+            const selector = document.getElementById('lang')
+            const input = document.getElementById('prompt')
+            const sender = document.getElementById('sendButton')
+            input.addEventListener('keydown', async event => event.keyCode === 13 && await sendMessage(event))
+            const createStream = async () => {
+                selector.disabled = true
+                input.disabled = true
+                sender.disabled = true
+                const content = document.querySelector('.message-box pre')
+                const response = await fetch(`http://${location.host}/copilot/stream`, {
+                    headers: { "Content-Type": "application/json" },
+                    method : '发布ST',
+                    body   : JSON.stringify({ lang: selector.value, prompt: input.value })
+                })
+                const reader = response.body.getReader()
+                content.innerHTML = ''
+                while (true) {
+                    const { done, value } = await reader.read()
+                    content.innerHTML += new TextDecoder().decode(value)
+                    if (done) {
+                        selector.disabled = false
+                        input.disabled = false
+                        sender.disabled = false
+                        return confirm('程序生成完毕！')
+                    }
                     window.scrollTo(0, document.body.scrollHeight)
                 }
-                ws.onclose = event => {
-                    document.getElementById('sendButton').disabled = false
-                    const messages = document.getElementById('messages')
-                    if (!messages.innerText.trim()) {
-                        return alert('服务失去连结！')
-                    }
-                    const doBest = messages.innerHTML.includes('I have done my best')
-                    return doBest ? alert('很抱歉没能写出代码！我已经尽力了…') : confirm('程序生成完毕！')
-                }
             }
-            const sendMessage = event => {
-                const lang = document.getElementById('lang').value
-                const prompt = document.getElementById('prompt').value
-                if (!lang || !prompt) {
-                    alert('请至少选择一种语言，或几句话来描述您的程序！')
-                    return
-                }
-                document.getElementById('sendButton').disabled = true
-                createWs(lang, prompt)
+            const sendMessage = async event => {
+                if (!selector.value || !input.value) return alert('请至少选择一种语言，或几句话来描述您的程序！')
+                await createStream()
                 event.preventDefault()
             }
         </script>

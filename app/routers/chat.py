@@ -92,7 +92,8 @@ def create_streaming(pipeline: Pipeline, chat_info: ChatInfo) -> Generator[str, 
     chunks: List[DeltaMessage] = []
     for chunk in streaming:
         chunks.append(chunk)
-        yield block_bad_words(chunk.content)
+        if pipeline.merge_streaming_messages(chunks).content.strip():
+            yield block_bad_words(chunk.content)
     messages.append(pipeline.merge_streaming_messages(chunks))
     save_chat_history(chat_info.uuid, messages)
 
@@ -101,15 +102,14 @@ async def create_socket(
 ) -> Coroutine[None, None, List[ChatMessage]]:
     """Similar as :func:`~create_conversation` the only difference is
     that chat pipeline is created by streaming :class:`~WebSocket`."""
-    response = ''
-    chunks: List[DeltaMessage] = []
     streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
         messages, **dict(p := ChatParam()), do_sample=p.temperature > 0, stream=True)
+    chunks: List[DeltaMessage] = []
     for chunk in streaming:
-        response += chunk.content
         chunks.append(chunk)
-        await websocket.send_json(dict(content=block_bad_words(response).lstrip(), completion=False))
-        await asleep(.01)
+        if (content := pipeline.merge_streaming_messages(chunks).content).strip():
+            await websocket.send_json(dict(content=block_bad_words(content).lstrip(), completion=False))
+            await asleep(.01)
     messages.append(pipeline.merge_streaming_messages(chunks))
     if messages[-1].tool_calls:
         return await create_socket(websocket, await observe(messages))

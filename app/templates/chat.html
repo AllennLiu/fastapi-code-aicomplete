@@ -71,12 +71,12 @@
             }
             const help = await helpMessages()
             document.getElementById('messages').innerHTML = `
-            <li>
+            <li class="annoucement">
                 <span style="color: green; font-weight: 600;">🤖：</span>
-                <span>您好，欢迎问我任何问题，我会尽可能回答！</span>
-                <!--
                 <span>您好，可以问我任何问题，或尽可能描述与下列接近的句子来调用 API 工具！</span>
                 <code><pre style="margin-block: 4px;">${JSON.stringify(help, null, 4)}</pre></code>
+                <!--
+                <span>您好，欢迎问我任何问题，我会尽可能回答！</span>
                 -->
             </li>
             `
@@ -92,43 +92,58 @@
                 if (messages.innerHTML.trim() === '') return
                 if (confirm('请问是否要清除对话纪录？')) messages.innerHTML = ''
             })
-            input.addEventListener('keydown', event => event.keyCode === 13 && sendMessage(event))
-            const creatWs = () => {
-                const ws = new WebSocket(`ws://${location.host}/chat/ws`)
-                ws.onmessage = event => {
-                    const resp = JSON.parse(event.data)
-                    const content = Array.from(messages.querySelectorAll('span')).pop()
-                    content.innerHTML = `<span>${resp.content.replace(/(?:\r\n|\r|\n)/g, '<br>')}</span>`
-                    window.scrollTo(0, document.body.scrollHeight)
-                    if (resp.completion === true) {
+            input.addEventListener('keydown', async event => event.keyCode === 13 && await sendMessage(event))
+            const getHistory = () => {
+                const history = []
+                Array.from(messages.querySelectorAll('li')).forEach(e =>
+                    e.className !== 'annoucement' && history.push({
+                        role: e.className, content: e.innerText.split('：').slice(1).join('：')
+                }))
+                return history
+            }
+            const createStream = async () => {
+                input.value = ''
+                input.disabled = true
+                sender.disabled = true
+                const content = Array.from(messages.querySelectorAll('span')).pop()
+                const response = await fetch(`http://${location.host}/chat/stream`, {
+                    headers: { "Content-Type": "application/json" },
+                    method : 'POST',
+                    body   : JSON.stringify({ query: input.value, history: getHistory().slice(0, -2) })
+                })
+                const reader = response.body.getReader()
+                content.innerHTML = ''
+                while (true) {
+                    const { done, value } = await reader.read()
+                    const message = new TextDecoder().decode(value)
+                    if (done) {
                         input.disabled = false
                         sender.disabled = false
+                        return
                     }
+                    content.innerHTML += `${message.replace(/(?:\r\n|\r|\n)/g, '<br>')}`
+                    window.scrollTo(0, document.body.scrollHeight)
                 }
-                return ws
             }
-            const ws = creatWs()
-            const sendMessage = event => {
+            const sendMessage = async event => {
                 if (input.value.trim() === '') return
                 const userMessage = document.createElement('li')
                 const botMessage = document.createElement('li')
                 const user = document.createElement('span')
                 const assistant = document.createElement('span')
                 const userText = document.createElement('span')
+                userMessage.classList.add('user')
+                botMessage.classList.add('assistant')
                 userText.style.color = 'burlywood'
                 userText.innerText = input.value
                 user.innerHTML = '<span style="color: blue; font-weight: 600;">🦲：</span>'
                 assistant.innerHTML = '<span style="color: green; font-weight: 600;">🤖：</span><span>…</span>'
-                ws.send(input.value)
-                input.value = ''
                 userMessage.appendChild(user)
                 userMessage.appendChild(userText)
                 botMessage.appendChild(assistant)
                 messages.appendChild(userMessage)
                 messages.appendChild(botMessage)
-                input.disabled = true
-                sender.disabled = true
-                window.scrollTo(0, document.body.scrollHeight)
+                await createStream()
                 event.preventDefault()
             }
         </script>
