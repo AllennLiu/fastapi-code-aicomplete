@@ -138,7 +138,8 @@
                     content.innerHTML += new TextDecoder().decode(value)
                     if (done) {
                         Array.from(document.querySelectorAll('.hljs-copy-button')).slice(1).forEach(e => e.remove())
-                        new ClipboardJS('.hljs-copy-button', { text: trigger => trigger.parentElement.innerText })
+                        new ClipboardJS('.hljs-copy-button', { text: trigger =>
+                            trigger.parentElement.querySelector('code').innerText.trimLeft() })
                         selector.disabled = false
                         input.disabled = false
                         sender.disabled = false

@@ -108,22 +108,6 @@
         </form>
         <div class="message-box"><ul id="messages"></ul></div>
         <script type="module">
-            hljs.addPlugin({ 'after:highlightElement': ({ el, text }) => {
-                const btn = Object.assign(document.createElement('button'), { innerHTML: '复制', className: 'hljs-copy-button' })
-                btn.dataset.copied = false
-                el.parentElement.classList.add('hljs-copy-wrapper')
-                el.parentElement.appendChild(btn)
-                el.parentElement.style.setProperty('--hljs-theme-background', window.getComputedStyle(el).backgroundColor)
-                el.parentElement.style.setProperty('--hljs-theme-color', window.getComputedStyle(el).color)
-                btn.onclick = function () {
-                    btn.innerHTML = '已复制!'
-                    btn.dataset.copied = true
-                    setTimeout(() => {
-                        btn.innerHTML = '复制'
-                        btn.dataset.copied = false
-                    }, 2000)
-                }
-            }})
             const helpMessages = async () => {
                 const response = await fetch(`http://${location.host}/chat/help`)
                 return await response.json()
@@ -145,6 +129,25 @@
             const now = new Date()
             const converter = new showdown.Converter()
             converter.setFlavor('github')
+            hljs.addPlugin({ 'after:highlightElement': ({ el, text }) => {
+                const btn = Object.assign(document.createElement('button'), { innerHTML: '复制', className: 'hljs-copy-button' })
+                btn.dataset.copied = false
+                el.parentElement.classList.add('hljs-copy-wrapper')
+                el.parentElement.appendChild(btn)
+                el.parentElement.style.setProperty('--hljs-theme-background', window.getComputedStyle(el).backgroundColor)
+                el.parentElement.style.setProperty('--hljs-theme-color', window.getComputedStyle(el).color)
+                btn.onclick = function () {
+                    btn.innerHTML = '已复制!'
+                    btn.dataset.copied = true
+                    setTimeout(() => {
+                        btn.innerHTML = '复制'
+                        btn.dataset.copied = false
+                    }, 2000)
+                }
+            }})
+            const toClipboard = () => new ClipboardJS('.hljs-copy-button', { text: trigger =>
+                trigger.parentElement.querySelector('code').innerText.trimLeft() })
+            toClipboard()
             const input = document.getElementById('messageText')
             const messages = document.getElementById('messages')
             const sender = document.getElementById('sendButton')
@@ -185,7 +188,7 @@
                         if (Array.from(content.childNodes).slice(-1).pop().tagName !== 'P') {
                             content.innerHTML += '<br>'
                         }
-                        new ClipboardJS('.hljs-copy-button', { text: trigger => trigger.parentElement.innerText })
+                        toClipboard()
                         input.disabled = false
                         sender.disabled = false
                         return
