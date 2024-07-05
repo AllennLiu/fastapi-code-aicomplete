@@ -18,11 +18,12 @@
 
 ### 👩‍💻 `AI` 依指定需求生成代碼 🔗 [http://127.0.0.1:7860/copilot/demo](http://127.0.0.1:7860/copilot/demo)
 
-![ai-coding](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/2978ffa4-e08b-41d7-882e-f83c7011453e)
+![coding](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/a2b37382-2487-4f02-8b3d-3e2d505d7070)
 
 ### 🤖 與聊天機器人互動 🔗 [http://127.0.0.1:7860/chat/demo](http://127.0.0.1:7860/chat/demo)
 
-![chat_x16_x10_x2](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/79fc7243-9d4c-4ce1-bab1-2de5d97e3c98)
+![chatbot](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/3fa83e23-ed30-4e25-9e02-4db364e48ebb)
+
 
 ---
 
