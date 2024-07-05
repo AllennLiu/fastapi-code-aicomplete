@@ -9,31 +9,16 @@
 > **Docker** 鏡像來打包整個 **FastAPI** 服務成一個程序 *(包含模型文件大小 > `50G` )*
 
 ---
+
 ## 🎥 效果演示 *(Stream)*
 
-### 👩‍💻 `AI` 依指定需求生成代碼 🔗 http://127.0.0.1:7860/copilot/demo
+### 👩‍💻 `AI` 依指定需求生成代碼 🔗 [http://127.0.0.1:7860/copilot/demo](http://127.0.0.1:7860/copilot/demo)
 
 ![ai-coding](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/2978ffa4-e08b-41d7-882e-f83c7011453e)
 
-### 🤖 與聊天機器人互動 🔗 http://127.0.0.1:7860/chat/demo
+### 🤖 與聊天機器人互動 🔗 [http://127.0.0.1:7860/chat/demo](http://127.0.0.1:7860/chat/demo)
 
 ![chat_x16_x10_x2](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/79fc7243-9d4c-4ce1-bab1-2de5d97e3c98)
-
----
-
-## 🌐 環境準備
-
-- 本項目已經將已配置好的環境鏡像，推在 `Dockerhub` 上了，**大小 `27G`** *(內含已載入的量化 `CodeGeeX2-6B` + `ChatGLM3-6B` 模型)*
-- 鏡像連結 🔗 [seven6306/pretrained-model:ai-fastapi-copilot](https://hub.docker.com/repository/docker/seven6306/pretrained-model/tags)
-- 如果您要手動 Build **Docker** 鏡像 `ai-fastapi-copilot` *(使用 Docker 來避免環境依賴等問題)*
-
-  ```bash
-  docker build --no-cache -t seven6306/pretrained-model:ai-fastapi-copilot . \
-    --build-arg "HTTP_PROXY=http://admin:ZD7EdEpF9qCYpDpu@10.99.104.250:8081/" \
-    --build-arg "HTTPS_PROXY=http://admin:ZD7EdEpF9qCYpDpu@10.99.104.250:8081/" \
-    --build-arg "NO_PROXY=localhost,127.0.0.1,.example.com"
-  # 掛代理 --build-arg 是我內部環境用的，可以刪除
-  ```
 
 ---
 
@@ -50,16 +35,16 @@ docker run -tid -p 7861:22 -p 7860:7860 \
   -v /etc/localtime:/etc/localtime:ro \
   -v /root/.ssh:/root/.ssh:ro \
   --ulimit nofile=65535 --privileged=true --restart=always \
-  --name copilot seven6306/pretrained-model:ai-fastapi-copilot
+  --name copilot seven6306/pretrained-model:ai-fastapi-glm4
 ```
 
 ---
 
-#### 在 **`FastAPI` Docs** 下嘗試 http://127.0.0.1:7860/docs
+**在 `FastAPI` Docs 下嘗試 [http://127.0.0.1:7860/docs](http://127.0.0.1:7860/docs)**
 
 ### 👨‍💻 代碼生成
 
-#### 可以选择的参数
+可以选择的参数
 
 - `lang` - 程序的語言如 `Python, JavaScript, Shell, ...`
 - `prompt` - 描述程序的需求
@@ -89,7 +74,7 @@ Pass
 
 ### 💬 進行聊天
 
-#### 可以选择的参数
+可以选择的参数
 
 - `query` - 用戶輸入信息
 - `history` - 進行**多輪式對話** *(數組形式 `[ dict... ]`)*
@@ -119,6 +104,38 @@ curl -X POST http://127.0.0.1:7860/chat/conversation \
   "elapsed_time": 1191.721331
 }
 ```
+
+---
+
+## 🌐 環境準備
+
+- 本項目已經將已配置好的環境鏡像，推在 `Dockerhub` 上了，**大小 `40G`** *(內含 `CodeGeeX2-6B` + `GLM-4-9B-Chat` LLM)*
+- 鏡像連結 🔗 [seven6306/pretrained-model:ai-fastapi-glm4](https://hub.docker.com/repository/docker/seven6306/pretrained-model/tags)
+- 如果您要手動 Build **Docker** 鏡像 `ai-fastapi-glm4` *(使用 Docker 來避免環境依賴等問題)*
+  1. 確認環境下有 `git-lfs` 工具，用 `Git` 來拉取 `hugging-face` 上的大型文件所需的工具
+
+     ```bash
+     git clone https://github.com/AllennLiu/fastapi-code-aicomplete.git
+     cd fastapi-code-aicomplete
+     git lfs install
+     ```
+
+  2. 下載兩個大模型 `CodeGeeX2-6B` 與 `GLM-4-9B-Chat` 至項目文件夾下 *(模型加起來有 `40G` 左右要下很久…)*
+
+     ```bash
+     git clone https://huggingface.co/THUDM/glm-4-9b-chat
+     git clone https://huggingface.co/THUDM/codegeex2-6b
+     ```
+
+  3. Build 鏡像 - 來源鏡像：`pytorch/pytorch:2.3.1-cuda11.8-cudnn8-devel`
+
+     ```bash
+     docker build --no-cache -t seven6306/pretrained-model:ai-fastapi-glm4 . \
+        --build-arg "HTTP_PROXY=http://admin:ZD7EdEpF9qCYpDpu@10.99.104.250:8081/" \
+        --build-arg "HTTPS_PROXY=http://admin:ZD7EdEpF9qCYpDpu@10.99.104.250:8081/" \
+        --build-arg "NO_PROXY=localhost,127.0.0.1,.example.com"
+     # 掛代理 --build-arg 是我內部環境用的，不需要可以刪除
+     ```
 
 ---
 
@@ -159,6 +176,6 @@ Fri Jun  7 21:06:49 2024
 
 ## 💡 參考來源
 
-- https://github.com/THUDM/CodeGeeX2
-- https://github.com/THUDM/GLM-4
-- https://github.com/li-plus/chatglm.cpp
+- [THUDM/CodeGeeX2](https://github.com/THUDM/CodeGeeX2)
+- [THUDM/GLM-4](https://github.com/THUDM/GLM-4)
+- [chatglm.cpp](https://github.com/li-plus/chatglm.cpp)
