@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
+        <link rel="shortcut icon" href="../static/favicon.png">
         <title>💬 ChatBot</title>
     </head>
     <style>
@@ -10,11 +10,11 @@
         }
         .head {
             color: aliceblue;
-            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            font-family: "JetBrains Mono", "Menlo", "DejaVu Sans Mono", "Liberation Mono", "Consolas", "Ubuntu Mono", "Courier New", "andale mono", "lucida console", monospace;
         }
         .message-box {
-            font-size: 20px;
-            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            font-size: 15px;
+            font-family: "JetBrains Mono", "Menlo", "DejaVu Sans Mono", "Liberation Mono", "Consolas", "Ubuntu Mono", "Courier New", "andale mono", "lucida console", monospace;
             font-weight: 500;
             color: lightskyblue;
             background-color: #2d333b;
@@ -24,10 +24,14 @@
             padding: 10px;
             min-height: 80vh;
         }
+        .message-box ul {
+            list-style-type: none;
+            padding-inline-start: 10px;
+        }
         .input-box {
             font-size: 16px;
             font-weight: 500;
-            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            font-family: "JetBrains Mono", "Menlo", "DejaVu Sans Mono", "Liberation Mono", "Consolas", "Ubuntu Mono", "Courier New", "andale mono", "lucida console", monospace;
             color: lightslategray;
             padding: 10px;
             border-radius: 6px;
@@ -39,7 +43,7 @@
         .sender {
             font-size: 15px;
             font-weight: 500;
-            font-family: 'Verdana, Geneva, Tahoma, sans-serif';
+            font-family: "JetBrains Mono", "Menlo", "DejaVu Sans Mono", "Liberation Mono", "Consolas", "Ubuntu Mono", "Courier New", "andale mono", "lucida console", monospace;
             padding: 10px;
             background: skyblue;
             color: white;
@@ -55,7 +59,46 @@
             opacity: .7;
             color: rgb(244, 244, 244);
         }
+        .chat-user {
+            color: burlywood;
+            font-size: 15px;
+            margin: 8px 0 12px 20px;
+        }
+        .chat-assistant {
+            font-size: 15px;
+            min-width: 3%;
+            margin: 8px 0 0 20px;
+            border-radius: 0.375rem;
+            --tw-text-opacity: 1;
+            color: rgba(86, 88, 105, var(--tw-text-opacity));
+            border: solid #d9d9e3;
+            border-width: 1px;
+            background-color: #d1e7f7;
+            padding: 0 14px;
+        }
+        .chat-user p, .chat-assistant p {
+            margin-block: 10px;
+        }
+        li.assistant {
+            margin-bottom: 10px;
+        }
+        .avatar {
+            display: flex;
+            font-size: 24px;
+        }
+        .hljs-copy-button {
+            cursor: pointer;
+        }
+        pre code.hljs {
+            border-radius: 8px;
+        }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlightjs-copy@1.0.5/dist/highlightjs-copy.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlightjs-copy@1.0.5/dist/highlightjs-copy.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.11/clipboard.min.js"></script>
     <body>
         <h1 class="head">Welcome ChatBot</h1>
         <form action="">
@@ -63,8 +106,24 @@
             <button class="sender" id="sendButton" type="button" onclick="sendMessage(event)">提交信息</button>
             <button class="sender clear" id="clearButton" type="button">清除信息</button>
         </form>
-        <div class="message-box"><ul id='messages'></ul></div>
+        <div class="message-box"><ul id="messages"></ul></div>
         <script type="module">
+            hljs.addPlugin({ 'after:highlightElement': ({ el, text }) => {
+                const btn = Object.assign(document.createElement('button'), { innerHTML: '复制', className: 'hljs-copy-button' })
+                btn.dataset.copied = false
+                el.parentElement.classList.add('hljs-copy-wrapper')
+                el.parentElement.appendChild(btn)
+                el.parentElement.style.setProperty('--hljs-theme-background', window.getComputedStyle(el).backgroundColor)
+                el.parentElement.style.setProperty('--hljs-theme-color', window.getComputedStyle(el).color)
+                btn.onclick = function () {
+                    btn.innerHTML = '已复制!'
+                    btn.dataset.copied = true
+                    setTimeout(() => {
+                        btn.innerHTML = '复制'
+                        btn.dataset.copied = false
+                    }, 2000)
+                }
+            }})
             const helpMessages = async () => {
                 const response = await fetch(`http://${location.host}/chat/help`)
                 return await response.json()
@@ -72,17 +131,20 @@
             const help = await helpMessages()
             document.getElementById('messages').innerHTML = `
             <li class="annoucement">
-                <span style="color: green; font-weight: 600;">🤖：</span>
-                <span>您好，可以问我任何问题，或尽可能描述与下列接近的句子来调用 API 工具！</span>
-                <code><pre style="margin-block: 4px;">${JSON.stringify(help, null, 4)}</pre></code>
+                <span class="avatar">🤖<div style="font-size: 15px; margin: 8px 20px 0 20px;">
+                    您好，可以问我任何问题，或尽可能描述与下列接近的句子来调用 API 工具！
+                    <pre><code class="language-json">${JSON.stringify(help, null, 4)}</code></pre>
+                </div></span>
                 <!--
                 <span>您好，欢迎问我任何问题，我会尽可能回答！</span>
                 -->
-            </li>
-            `
+            </li>`
+            hljs.highlightAll()
         </script>
         <script>
             const now = new Date()
+            const converter = new showdown.Converter()
+            converter.setFlavor('github')
             const input = document.getElementById('messageText')
             const messages = document.getElementById('messages')
             const sender = document.getElementById('sendButton')
@@ -90,38 +152,55 @@
             const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
             tidyup.addEventListener('click', event => {
                 if (messages.innerHTML.trim() === '') return
-                if (confirm('请问是否要清除对话纪录？')) messages.innerHTML = ''
+                confirm('请问是否要清除对话纪录？') && messages.querySelectorAll('li.user,li.assistant').forEach(e => e.remove())
             })
             input.addEventListener('keydown', async event => event.keyCode === 13 && await sendMessage(event))
             const getHistory = () => {
                 const history = []
-                Array.from(messages.querySelectorAll('li')).forEach(e =>
+                Array.from(messages.querySelectorAll('li.user div,li.assistant div')).forEach(e =>
                     e.className !== 'annoucement' && history.push({
-                        role: e.className, content: e.innerText.split('：').slice(1).join('：')
+                        role: e.className.split('-')[ 1 ], content: e.innerText
                 }))
                 return history
             }
             const createStream = async () => {
+                const query = input.value
                 input.value = ''
                 input.disabled = true
                 sender.disabled = true
-                const content = Array.from(messages.querySelectorAll('span')).pop()
+                const history = getHistory().slice(0, -2)
+                const content = Array.from(messages.querySelectorAll('div.chat-assistant')).pop()
                 const response = await fetch(`http://${location.host}/chat/stream`, {
                     headers: { "Content-Type": "application/json" },
                     method : 'POST',
-                    body   : JSON.stringify({ query: input.value, history: getHistory().slice(0, -2) })
+                    body   : JSON.stringify({ query: query, history: history })
                 })
                 const reader = response.body.getReader()
+                let messageText = '', code = ''
                 content.innerHTML = ''
                 while (true) {
                     const { done, value } = await reader.read()
                     const message = new TextDecoder().decode(value)
                     if (done) {
+                        if (Array.from(content.childNodes).slice(-1).pop().tagName !== 'P') {
+                            content.innerHTML += '<br>'
+                        }
+                        new ClipboardJS('.hljs-copy-button', { text: trigger => trigger.parentElement.innerText })
                         input.disabled = false
                         sender.disabled = false
                         return
                     }
-                    content.innerHTML += `${message.replace(/(?:\r\n|\r|\n)/g, '<br>')}`
+                    if (message.match(new RegExp('^```\\w+', 'g'))) {
+                        code += message
+                    } else if (message.match(new RegExp('^```', 'g'))) {
+                        messageText += code
+                        code = ''
+                    }
+                    if (!code) {
+                        messageText += message
+                    }
+                    content.innerHTML = converter.makeHtml(messageText) + code
+                    content.querySelectorAll('pre code').forEach(e => hljs.highlightElement(e))
                     window.scrollTo(0, document.body.scrollHeight)
                 }
             }
@@ -131,15 +210,13 @@
                 const botMessage = document.createElement('li')
                 const user = document.createElement('span')
                 const assistant = document.createElement('span')
-                const userText = document.createElement('span')
                 userMessage.classList.add('user')
                 botMessage.classList.add('assistant')
-                userText.style.color = 'burlywood'
-                userText.innerText = input.value
-                user.innerHTML = '<span style="color: blue; font-weight: 600;">🦲：</span>'
-                assistant.innerHTML = '<span style="color: green; font-weight: 600;">🤖：</span><span>…</span>'
+                user.classList.add('avatar')
+                assistant.classList.add('avatar')
+                user.innerHTML = `🦲<div class="chat-user">${input.value}</div>`
+                assistant.innerHTML = '🤖<div class="chat-assistant">…</div>'
                 userMessage.appendChild(user)
-                userMessage.appendChild(userText)
                 botMessage.appendChild(assistant)
                 messages.appendChild(userMessage)
                 messages.appendChild(botMessage)

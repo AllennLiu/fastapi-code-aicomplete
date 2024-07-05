@@ -58,7 +58,7 @@ function main
 {
     config_sshd
     gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT -t 300 \
-        --worker-connections 1 --reload -w 4 -k uvicorn.workers.UvicornWorker
+        --worker-connections 1 --reload -w 2 -k uvicorn.workers.UvicornWorker
     exit 0
 }
 
