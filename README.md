@@ -2,11 +2,15 @@
 
 使用 `FastAPI` 搭配預訓練 `CodeGeeX2 + GLM-4` 模型，通過 `AI` 智能生成代碼
 
-目前測試起來，**整體功能非常強大**，對於硬件環境沒那麼富裕的開發人員很友好。
+目前測試起來，**整體功能非常強大**，對於硬件環境沒那麼富裕的開發人員很友好 👀
 
 目前已整合了 `CodeGeeX2-6B` + `GLM-4-9B-Chat` 量化模型，使這 2 個由**清华大学 KEG 智谱**偉大的作品很好的合併使用！
 
-> **Docker** 鏡像來打包整個 **FastAPI** 服務成一個程序 *(包含模型文件大小 > `50G` )*
+> **Docker** 鏡像來打包整個 **FastAPI** 服務成一個程序 *(包含模型文件大小 > `31G` )*
+>
+> 歡迎訪問我們的倉庫 👉 [https://hub.docker.com/r/seven6306/pretrained-model](https://hub.docker.com/r/seven6306/pretrained-model)
+>
+> 也誠摯歡迎加入我們一起玩玩有趣的技術 🤝
 
 ---
 
