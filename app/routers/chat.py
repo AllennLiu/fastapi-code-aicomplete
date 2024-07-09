@@ -1,4 +1,4 @@
-import json, textwrap, datetime
+import re, json, textwrap, datetime
 from operator import itemgetter
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
@@ -10,18 +10,13 @@ from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, I
 
 from ..config import get_settings
 from ..utils import RedisContextManager, websocket_catch, block_bad_words, tw_to_cn
-from ..toolkit import Tools, run_function, build_tool_system_prompt, is_function_call, remove_tool_calls_message
-
-SYSTEM_PROMPT = build_tool_system_prompt(textwrap.dedent("""\
-你是人工智能 AI 助手，你叫 Black.Milan，你是由 SIT TA 团队创造的。
-你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。\
-"""))
+from ..toolkit import run_func, func_called, remove_tool_calls, compress_message, SYSTEM_PROMPT, REGISTERED_TOOLS
 
 settings = get_settings()
 router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: { "description": "Not found" }})
 
 class ChatParam(BaseModel):
-    max_length: int = Field(8192, le=131072, description='Response length maximum is `128k`')
+    max_length: int = Field(2500, le=2500, description='Response length maximum is `2500`')
     top_p: float = Field(.8, description='Lower values **reduce `diversity`** and focus on more **probable tokens**')
     temperature: float = Field(.8, description='Higher will make **outputs** more `random` and `diverse`')
     repetition_penalty: float = Field(1., le=1., description='Higher values bot will not be repeating')
@@ -40,7 +35,10 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
     in ``first system declared message`` or it even not exists ever."""
     prompt = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=chat_info.system or SYSTEM_PROMPT.content)
     if not chat_info.uuid:
-        return [ ChatMessage(**e) for e in chat_info.history ] or [ prompt ]
+        messages = [ ChatMessage(**e) for e in chat_info.history ]
+        if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), chat_info.history)):
+            messages[0: 0] = [ prompt ]
+        return messages
     messages: List[ChatMessage] = []
     with RedisContextManager(settings.db.redis) as r:
         query: List[Dict[str, str]] = json.loads(r.get(f'talk-history-{chat_info.uuid}') or '[]')
@@ -48,7 +46,7 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
         if history["role"] == ChatMessage.ROLE_SYSTEM and prompt.content not in history["content"]:
             history |= dict(content=prompt.content + history["content"])
         messages.append(ChatMessage(**history))
-    if ChatMessage.ROLE_SYSTEM not in map(itemgetter('role'), query):
+    if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), query)):
         messages[0: 0] = [ prompt ]
     return messages or [ prompt ]
 
@@ -61,13 +59,12 @@ def save_chat_history(user_uuid: str, messages: Iterable[ChatMessage]) -> None:
         r.set(f'talk-history-{user_uuid}', json.dumps(data, ensure_ascii=False))
 
 async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
-    """While the tool function is included in chat messages, this is
-    gonna parsing the contents to separate it into the function name
-    and arguments, then using the :func:`~run_function` to call the
-    specified function."""
+    """While the tool function is included in chat messages, it parsing
+    the contents to separate it into the function name and arguments,
+    then call the :func:`~run_func` to invoke specified function."""
     tool_call_contents = messages[-1].content.splitlines()
     func_name, func_arg = tool_call_contents[0], '\n'.join(tool_call_contents[1:])
-    observation = run_function(func_name, func_arg)
+    observation = run_func(func_name, func_arg)
     messages.append(ChatMessage(role=ChatMessage.ROLE_OBSERVATION, content=observation))
     return messages
 
@@ -82,7 +79,7 @@ async def create_conversation(
         messages, **dict(p := ChatParam(**dict(chat_info))), do_sample=p.temperature > 0)
     response.content = block_bad_words(response.content).lstrip()
     messages.append(response)
-    if is_function_call(messages[-1]):
+    if func_called(messages[-1]):
         return await create_conversation(pipeline, chat_info, await observe(messages))
     return messages
 
@@ -100,7 +97,7 @@ async def create_socket(
             await websocket.send_json(dict(content=block_bad_words(content).lstrip(), completion=False))
             await asleep(.01)
     messages.append(pipeline.merge_streaming_messages(chunks))
-    if is_function_call(messages[-1]):
+    if func_called(messages[-1]):
         return await create_socket(websocket, await observe(messages))
     return messages
 
@@ -116,7 +113,7 @@ async def create_chat_conversation(
     messages = merge_chat_history(chat_info)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=tw_to_cn.convert(chat_info.query)))
     messages = await create_conversation(request.app.chat.model, chat_info, messages)
-    messages = list(remove_tool_calls_message(messages))
+    messages = list(remove_tool_calls(messages))
     save_chat_history(chat_info.uuid, messages)
     if chat_info.html:
         return HTMLResponse(status_code=200, content=messages[-1].content)
@@ -130,9 +127,12 @@ async def create_chat_conversation(
 async def create_streaming(
     pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
 ) -> AsyncIterator[str]:
-    print(messages)
+    _messages = compress_message(messages, chat_info.max_length)
+    print(f' ~~~~~ Num => {len(_messages)} Len => {sum( len(m.content) for m in _messages )}')
     streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
-        messages, **dict(p := ChatParam(**dict(chat_info))), do_sample=p.temperature > 0, stream=True)
+        _messages,
+        **dict(p := ChatParam(**dict(chat_info))),
+        do_sample=p.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
     for chunk in streaming:
         chunks.append(chunk)
@@ -140,12 +140,12 @@ async def create_streaming(
             yield block_bad_words(chunk.content)
             await asleep(.01)
     messages.append(pipeline.merge_streaming_messages(chunks))
-    print(messages[-1])
-    if is_function_call(messages[-1]):
+    if func_called(messages[-1]):
+        yield '\n\n'
         async for chunk in create_streaming(pipeline, chat_info, await observe(messages)):
             yield chunk
             await asleep(.01)
-    save_chat_history(chat_info.uuid, remove_tool_calls_message(messages))
+    save_chat_history(chat_info.uuid, remove_tool_calls(messages))
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Chat')
 async def create_chat_stream(
@@ -171,7 +171,7 @@ async def create_chat_websocket(websocket: WebSocket):
         messages = await create_socket(websocket, websocket.app.chat.model, messages)
         await websocket.send_json(dict(content=messages[-1].content, completion=True))
         await asleep(1)
-        messages = list(remove_tool_calls_message(messages))
+        messages = list(remove_tool_calls(messages))
 
 @router.get('/demo', response_class=HTMLResponse, include_in_schema=False)
 async def render_chat_demo(request: Request) -> HTMLResponse:
@@ -180,7 +180,7 @@ async def render_chat_demo(request: Request) -> HTMLResponse:
 
 @router.get('/help')
 async def show_toolkit() -> JSONResponse:
-    resp = list(map(itemgetter('description'), Tools.tools))
+    resp = list(map(itemgetter('description'), REGISTERED_TOOLS))
     return JSONResponse(status_code=200, content=resp)
 
 @router.delete('/forget/{uuid}/{range}')

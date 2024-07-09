@@ -52,6 +52,12 @@ class RedisContextManager:
         r.delete(name)
         r.expire(name, expired_time)
     ```
+    Get hash keys:
+    ```
+    with RedisContextManager('127.0.0.1:6379') as r:
+        print(r.hkeys('my-data'))
+    ```
+    >>> ['a', 'b', 'c', 'd']
     """
     def __init__(self, host: str, db: int = 0, decode_responses: bool = True) -> None:
         self.host = host.split(':')[0]
@@ -87,7 +93,7 @@ def device(
     """
     使用 :module:`~chatglm_cpp` 量化加速推理，實現通過 `CPU+MEM` 也能與
     模型實時交互，取代原先通過 :module:`~transformers` 進行推理的方式
-    
+
     - 量化精度：``fp32 > fp16 > int8 > int4`` 越小模型推理能力越差，但對於硬體要求就越低
     - 同上，``fp32`` 和 ``fp16`` 需在有 `GPU` 的設備上運行才能擁有正常的推理表現
     """

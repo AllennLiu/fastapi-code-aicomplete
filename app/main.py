@@ -14,10 +14,10 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncIterator[Any]:
     param = dict(quantize=int(settings.models.quantize), device=settings.load_dev)
     app.chat = ML(*device(settings.models.chatbot_name, quantize=8, device=settings.load_dev))
-    # app.copilot = ML(*device(settings.models.copilot_name, dtype=settings.models.dtype, **param))
+    app.copilot = ML(*device(settings.models.copilot_name, dtype=settings.models.dtype, **param))
     yield
     del app.chat
-    # del app.copilot
+    del app.copilot
 
 app = FastAPI(title=settings.app_name, description=settings.desc, lifespan=lifespan)
 app.mount('/static', StaticFiles(directory='static'), name='static')

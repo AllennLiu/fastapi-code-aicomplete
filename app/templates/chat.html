@@ -10,6 +10,7 @@
         }
         .head {
             color: aliceblue;
+            font-weight: bold;
             font-family: "JetBrains Mono", "Menlo", "DejaVu Sans Mono", "Liberation Mono", "Consolas", "Ubuntu Mono", "Courier New", "andale mono", "lucida console", monospace;
         }
         .message-box {
@@ -59,6 +60,10 @@
             opacity: .7;
             color: rgb(244, 244, 244);
         }
+        .checkbox {
+            cursor: pointer;
+            margin-left: 8px;
+        }
         .chat-user {
             color: burlywood;
             font-size: 15px;
@@ -74,10 +79,10 @@
             border: solid #d9d9e3;
             border-width: 1px;
             background-color: #d1e7f7;
-            padding: 0 14px;
+            padding: 8px 14px;
         }
         .chat-user p, .chat-assistant p {
-            margin-block: 10px;
+            margin-block: 4px;
         }
         li.assistant {
             margin-bottom: 10px;
@@ -105,6 +110,8 @@
             <input class="input-box" type="text" id="messageText" autocomplete="off" required/>
             <button class="sender" id="sendButton" type="button" onclick="sendMessage(event)">提交信息</button>
             <button class="sender clear" id="clearButton" type="button">清除信息</button>
+            <input class="checkbox" type="checkbox" id="ToolCalls"/>
+            <label class="head" for="ToolCalls">🛠️工具调用</label>
         </form>
         <div class="message-box"><ul id="messages"></ul></div>
         <script type="module">
@@ -116,7 +123,7 @@
             document.getElementById('messages').innerHTML = `
             <li class="annoucement">
                 <span class="avatar">🤖<div style="font-size: 15px; margin: 8px 20px 0 20px;">
-                    您好，可以问我任何问题，或尽可能描述与下列接近的句子来调用 API 工具！
+                    您好，可以问我任何问题，或勾选【工具调用】后描述接近下列句子来调用工具！
                     <pre><code class="language-json">${JSON.stringify(help, null, 4)}</code></pre>
                 </div></span>
                 <!--
@@ -126,6 +133,7 @@
             hljs.highlightAll()
         </script>
         <script>
+            const history = []
             const now = new Date()
             const converter = new showdown.Converter()
             converter.setFlavor('github')
@@ -152,26 +160,18 @@
             const messages = document.getElementById('messages')
             const sender = document.getElementById('sendButton')
             const tidyup = document.getElementById('clearButton')
+            const tool = document.getElementById('ToolCalls')
             const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
             tidyup.addEventListener('click', event => {
                 if (messages.innerHTML.trim() === '') return
                 confirm('请问是否要清除对话纪录？') && messages.querySelectorAll('li.user,li.assistant').forEach(e => e.remove())
             })
             input.addEventListener('keydown', async event => event.keyCode === 13 && await sendMessage(event))
-            const getHistory = () => {
-                const history = []
-                Array.from(messages.querySelectorAll('li.user div,li.assistant div')).forEach(e =>
-                    e.className !== 'annoucement' && history.push({
-                        role: e.className.split('-')[ 1 ], content: e.innerText
-                }))
-                return history
-            }
             const createStream = async () => {
-                const query = input.value
+                const query = `${tool.checked ? 'call tool:' : ''}${input.value}`
                 input.value = ''
                 input.disabled = true
                 sender.disabled = true
-                const history = getHistory().slice(0, -2)
                 const content = Array.from(messages.querySelectorAll('div.chat-assistant')).pop()
                 const response = await fetch(`http://${location.host}/chat/stream`, {
                     headers: { "Content-Type": "application/json" },
@@ -185,10 +185,8 @@
                     const { done, value } = await reader.read()
                     const message = new TextDecoder().decode(value)
                     if (done) {
-                        if (Array.from(content.childNodes).slice(-1).pop().tagName !== 'P') {
-                            content.innerHTML += '<br>'
-                        }
                         toClipboard()
+                        history.push(...[ { role: 'user', content: query }, { role: 'assistant', content: messageText } ])
                         input.disabled = false
                         sender.disabled = false
                         return
