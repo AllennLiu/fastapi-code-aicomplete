@@ -78,7 +78,8 @@ DOTENV_CONFIG = os.path.join('app', '.env')
 HUB_PATH = '/root/.cache/huggingface/hub'
 
 class Database(BaseSettings):
-    redis: str = '10.99.104.250:6379'
+    redis: str = '10.99.104.251:8003'
+    # redis: str = '10.99.104.250:6379'
 
 class ModelConfig(BaseSettings):
     chatbot_name : str = '/workspace/glm-4-9b-chat'

@@ -1,4 +1,4 @@
-import re, json, textwrap, datetime
+import json, textwrap, datetime
 from operator import itemgetter
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
@@ -9,11 +9,22 @@ from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
 from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, Iterable
 
 from ..config import get_settings
-from ..utils import RedisContextManager, websocket_catch, block_bad_words, tw_to_cn
+from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, tw_to_cn
 from ..toolkit import run_func, func_called, remove_tool_calls, compress_message, SYSTEM_PROMPT, REGISTERED_TOOLS
 
 settings = get_settings()
 router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: { "description": "Not found" }})
+PATH_UUID = Path(description='User `UUID`')
+PATH_DATE = Path(description='Tab created **datetime**')
+
+class ChatTab(BaseModel):
+    label    : str = ''
+    datetime : str = ''
+
+class ChatRename(BaseModel):
+    uuid: str = Field(..., description='User `UUID`')
+    name: str = Field(..., description='The `Tab Name` which is going to change')
+    datetime: str = Field(..., description='Tab created **datetime**')
 
 class ChatParam(BaseModel):
     max_length: int = Field(2500, le=2500, description='Response length maximum is `2500`')
@@ -25,6 +36,7 @@ class ChatInfo(ChatParam):
     uuid: str | None = Field('', description='User `UUID` _(empty will be without Redis cache)_')
     query: str = Field(..., examples=[ '你好' ], description='Message content')
     history: List[Dict[str, str]] = Field([], description='Conversation history list for assistant reference')
+    label: Dict[str, str] | None = Field({}, description='Label data for entry details')
     system: str = Field(SYSTEM_PROMPT.content, description='Role `system` content for declare bot')
     html: bool = Field(False, description='Response to `HTML` context directly')
 
@@ -41,22 +53,30 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
         return messages
     messages: List[ChatMessage] = []
     with RedisContextManager(settings.db.redis) as r:
-        query: List[Dict[str, str]] = json.loads(r.get(f'talk-history-{chat_info.uuid}') or '[]')
-    for history in query:
+        if chat_info.label:
+            query = r.hget(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime'))
+            histories = json.loads(query or '{}').get('history', [])
+        else:
+            histories = json.loads(r.get(f'talk-history-{chat_info.uuid}') or '[]')
+    for history in histories:
         if history["role"] == ChatMessage.ROLE_SYSTEM and prompt.content not in history["content"]:
             history |= dict(content=prompt.content + history["content"])
         messages.append(ChatMessage(**history))
-    if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), query)):
+    if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), histories)):
         messages[0: 0] = [ prompt ]
     return messages or [ prompt ]
 
-def save_chat_history(user_uuid: str, messages: Iterable[ChatMessage]) -> None:
+def save_chat_history(chat_info: ChatInfo, messages: Iterable[ChatMessage]) -> None:
     """Converting all the :class:`~ChatMessage` object to :class:`~dict`
     then save it to **Redis** with it owns user's ``uuid``."""
-    if not user_uuid: return
+    if not chat_info.uuid: return
     data = [ dict(role=m.role, content=m.content) for m in messages ]
     with RedisContextManager(settings.db.redis) as r:
-        r.set(f'talk-history-{user_uuid}', json.dumps(data, ensure_ascii=False))
+        if chat_info.label:
+            stringify = json.dumps(dict(**chat_info.label, history=data), ensure_ascii=False)
+            r.hset(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime'), stringify)
+        else:
+            r.set(f'talk-history-{chat_info.uuid}', json.dumps(data, ensure_ascii=False))
 
 async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
     """While the tool function is included in chat messages, it parsing
@@ -82,6 +102,29 @@ async def create_conversation(
     if func_called(messages[-1]):
         return await create_conversation(pipeline, chat_info, await observe(messages))
     return messages
+
+async def create_streaming(
+    pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
+) -> AsyncIterator[str]:
+    _messages = compress_message(messages, chat_info.max_length)
+    print(f' ~~~~~ Num => {len(_messages)} Len => {sum( len(m.content) for m in _messages )}')
+    streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
+        _messages,
+        **dict(p := ChatParam(**dict(chat_info))),
+        do_sample=p.temperature > 0, stream=True)
+    chunks: List[DeltaMessage] = []
+    for chunk in streaming:
+        chunks.append(chunk)
+        if pipeline.merge_streaming_messages(chunks).content.strip():
+            yield block_bad_words(chunk.content)
+            await asleep(.01)
+    messages.append(pipeline.merge_streaming_messages(chunks))
+    if func_called(messages[-1]):
+        yield '\n\n'
+        async for chunk in create_streaming(pipeline, chat_info, await observe(messages)):
+            yield chunk
+            await asleep(.01)
+    save_chat_history(chat_info, remove_tool_calls(messages))
 
 async def create_socket(
     websocket: WebSocket, pipeline: Pipeline, messages: List[ChatMessage]
@@ -114,7 +157,7 @@ async def create_chat_conversation(
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=tw_to_cn.convert(chat_info.query)))
     messages = await create_conversation(request.app.chat.model, chat_info, messages)
     messages = list(remove_tool_calls(messages))
-    save_chat_history(chat_info.uuid, messages)
+    save_chat_history(chat_info, messages)
     if chat_info.html:
         return HTMLResponse(status_code=200, content=messages[-1].content)
     return JSONResponse(status_code=200, content=dict(
@@ -124,28 +167,15 @@ async def create_chat_conversation(
         elapsed_time = (now - begin).total_seconds()
     ))
 
-async def create_streaming(
-    pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
-) -> AsyncIterator[str]:
-    _messages = compress_message(messages, chat_info.max_length)
-    print(f' ~~~~~ Num => {len(_messages)} Len => {sum( len(m.content) for m in _messages )}')
-    streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
-        _messages,
-        **dict(p := ChatParam(**dict(chat_info))),
-        do_sample=p.temperature > 0, stream=True)
-    chunks: List[DeltaMessage] = []
-    for chunk in streaming:
-        chunks.append(chunk)
-        if pipeline.merge_streaming_messages(chunks).content.strip():
-            yield block_bad_words(chunk.content)
-            await asleep(.01)
-    messages.append(pipeline.merge_streaming_messages(chunks))
-    if func_called(messages[-1]):
-        yield '\n\n'
-        async for chunk in create_streaming(pipeline, chat_info, await observe(messages)):
-            yield chunk
-            await asleep(.01)
-    save_chat_history(chat_info.uuid, remove_tool_calls(messages))
+@router.post('/subject', response_model=None, response_description='Chat Subject')
+async def get_chat_conversation_subject(
+    request: Request, chat_info: Annotated[ChatInfo, Body()]
+) -> JSONResponse:
+    chat_info.query = f'10个字以内描述大意:{chat_info.query[:128]}'
+    prompt = ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query)
+    messages = await create_conversation(request.app.chat.model, chat_info, [ prompt ])
+    resp = dict(subject=remove_punctuation(messages[-1].content).capitalize()[:10])
+    return JSONResponse(status_code=200, content=resp)
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Chat')
 async def create_chat_stream(
@@ -183,9 +213,44 @@ async def show_toolkit() -> JSONResponse:
     resp = list(map(itemgetter('description'), REGISTERED_TOOLS))
     return JSONResponse(status_code=200, content=resp)
 
+@router.get('/tabs/{uuid}')
+async def get_chat_tabs(uuid: Annotated[str, Path(description='User `UUID`')]) -> JSONResponse:
+    with RedisContextManager(settings.db.redis) as r:
+        name = f'talk-history-hash-{uuid}'
+        tabs = [ dict(ChatTab(**json.loads(r.hget(name, k) or '{}'))) for k in r.hkeys(name) ]
+    resp = sorted(tabs, key=itemgetter('datetime'), reverse=True)
+    return JSONResponse(status_code=200, content=resp)
+
+@router.put('/tab/rename')
+async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body()]) -> JSONResponse:
+    with RedisContextManager(settings.db.redis) as r:
+        args = ( f'talk-history-hash-{chat_tab.uuid}', chat_tab.datetime )
+        data = json.loads(r.hget(*args) or '{}') | dict(label=chat_tab.name)
+        r.hset(*args, json.dumps(data, ensure_ascii=False))
+        resp = dict(ChatTab(**json.loads(r.hget(*args))))
+    return JSONResponse(status_code=200, content=resp)
+
+@router.get('/history/{uuid}/{datetime}')
+async def get_chat_history_by_datetime(
+    uuid: Annotated[str, PATH_UUID], datetime: Annotated[str, PATH_DATE]
+) -> JSONResponse:
+    with RedisContextManager(settings.db.redis) as r:
+        data = json.loads(r.hget(f'talk-history-hash-{uuid}', datetime) or '{}')
+    return JSONResponse(status_code=200, content=data.get('history', []))
+
+@router.delete('/history/{uuid}/{datetime}')
+async def delete_chat_history_by_datetime(
+    uuid: Annotated[str, PATH_UUID], datetime: Annotated[str, PATH_DATE]
+) -> JSONResponse:
+    with RedisContextManager(settings.db.redis) as r:
+        args = ( f'talk-history-hash-{uuid}', datetime )
+        r.hdel(*args)
+        resp = dict(ok=r.hget(*args) is None)
+    return JSONResponse(status_code=200, content=resp)
+
 @router.delete('/forget/{uuid}/{range}')
 async def clean_chat_history(
-    uuid : Annotated[str, Path(description='User `UUID`')],
+    uuid : Annotated[str, PATH_UUID],
     range: Annotated[int, Path(description=textwrap.dedent("""\
     Chat history **forget range**: the range of `pair entry` is **count from the end**\n
     **Pair entry** means the history which is the role both of user and assistant.

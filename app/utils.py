@@ -1,4 +1,4 @@
-import re, opencc, textwrap, redis
+import re, opencc, textwrap, redis, string
 from functools import wraps
 from contextlib import suppress
 from fastapi import WebSocketDisconnect
@@ -147,3 +147,18 @@ def block_bad_words(content: str) -> str:
     """屏蔽在聊天信息中不允許的字符"""
     regexp = 'chatg[\w|-]+|清华大学.*KEG|智谱.*AI|GLM.*\d+'
     return re.sub(regexp, 'Black.Milan', content, flags=re.I)
+
+def remove_punctuation(content: str) -> str:
+    """
+    將下列拼接起來使用 :func:`~str.maketrans` 建立翻譯表，將所有的
+    標點符號映射成 `None`
+    - 英文字符的符號 `string.punctuation`
+    - 常用中文字符和符號的 `Unicode ASCII 碼` 範圍 ``0x3000`` 到 ``0x303F``
+    - 全角字符的 `Unicode 碼` 範圍 ``0xFF00`` 到 ``0xFFEF``\n
+    最後使用 :func:`~str.translate` 刪除文本中所有的**中英文標點符號**
+    """
+    punctuation = string.punctuation
+    punctuation += ''.join(chr(i) for i in range(0x3000, 0x303F))
+    punctuation += ''.join(chr(i) for i in range(0xFF00, 0xFFEF))
+    translator = str.maketrans('', '', punctuation)
+    return content.translate(translator)

@@ -34,7 +34,7 @@ class Tools:
         """
         代码小帮手，语言: xxx，提示: xxx
         """
-        url = 'http://172.17.1.243:7862/copilot/coding'
+        url = 'http://ares-ai.sit.ipt.inventec:7862/copilot/coding'
         headers = { "Content-Type": "application/json" }
         data = {
             "max_length": 512,
@@ -55,9 +55,8 @@ class Tools:
         """
         根据城市名称获取当前天气
         """
-        if not isinstance(city_name, str):
-            raise TypeError('City name must be a string')
-        keys = { "current_condition": [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ] }
+        attrs = [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ]
+        keys = { "current_condition": attrs }
         resp = requests.get(f'https://wttr.in/{city_name}?format=j1')
         resp: dict = resp.json()
         return json.dumps({ k: { _v: resp[k][0][_v] for _v in keys[k] } for k in keys })
@@ -71,13 +70,10 @@ class Tools:
         """
         连线到 IP 地址，密碼是: xxx，执行命令 xxx
         """
-        if not isinstance(query, str):
-            raise TypeError('Command must be a string')
-        timeout = 10.
         client = paramiko.SSHClient()
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, 22, 'root', password, timeout=timeout)
+        client.connect(host, 22, 'root', password, timeout=(timeout := 10.))
         transport = client.get_transport()
         transport.set_keepalive(int(timeout))
         _, stdout, stderr = client.exec_command(query)
@@ -119,14 +115,16 @@ def build_tool_system_prompt(content: str) -> ChatMessage:
         content += f'\n\n## {tool["name"]}\n\n{json.dumps(tool, ensure_ascii=False, indent=4)}'
     return ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=content)
 
-SYSTEM_PROMPT = build_tool_system_prompt(textwrap.dedent("""\
+SYSTEM_PROMPT = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=textwrap.dedent("""\
 你是人工智能 AI 助手，你叫 Black.Milan，你是由 SIT TA 团队创造的。
 你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。\
 """))
+SYSTEM_TOOL_PROMPT = build_tool_system_prompt(SYSTEM_PROMPT.content)
 
 def func_called(message: ChatMessage) -> bool:
-    """Determine whether the first line of message content which is
-    included in currently available :class:`~Tools`."""
+    """Determine whether the first line of message content which name
+    is included in global variable `REGISTERED_TOOLS` that available
+    :class:`~Tools`."""
     return message.content.splitlines()[0] in map(itemgetter('name'), REGISTERED_TOOLS)
 
 def run_func(name: str, arguments: str) -> str:
@@ -137,8 +135,6 @@ def run_func(name: str, arguments: str) -> str:
     def tool_call(**kwargs: Any) -> Dict[str, Any]:
         return kwargs
     func: Callable[..., Any] = getattr(Tools, name)
-    if func is None:
-        return f'Function `{name}` is not defined'
     try:
         kwargs = eval(arguments, dict(tool_call=tool_call))
     except Exception:
@@ -159,22 +155,37 @@ def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, Non
             continue
         yield message
 
-def compress_message(messages: List[ChatMessage], max_length: int = 1536) -> List[ChatMessage]:
-    """If a message content length is large over than ``512``
-    bytes, truncate it to ``128`` bytes before the content,
-    just for collecting the characteristic of message content."""
+def compress_message(messages: List[ChatMessage], max_length: int = 2048) -> List[ChatMessage]:
+    """When tool function has been called, the messages is going
+    to compress into **system prompt** + **the last message which
+    is function calls**.
+
+    Compress the each message recursively if the content length
+    is large over than `max_length` then shift out the first two
+    items _(user + assistant)_ from the messages, at the mean time,
+    these message being iterated to remove following contents:
+    - Markdown code block including the context
+    - Function calls name and passed arguments
+    - After the two previous operations, clear the unused newline
+
+    If a message content length is large over than ``512`` bytes,
+    truncate it to ``128`` bytes before the content, it just for
+    collecting the characteristic of message content."""
     if (re.search('call tool:', messages[-1].content, re.I)
         or messages[-1].role == ChatMessage.ROLE_OBSERVATION):
-        return [ messages[0], messages[-1] ]
+        return [ SYSTEM_TOOL_PROMPT, messages[-1] ]
     content = ''
     for message in messages:
         if message.role != ChatMessage.ROLE_SYSTEM:
-            message.content = re.sub(
-                r'^```[^\S\r\n]*[a-z]*(?:\n(?!```$).*)*\n```', '', message.content, 0, re.MULTILINE)
-            message.content = re.sub('get_[\w_]+\n+\{\S.*\}\n+', '', message.content)
+            regex_code_block = r'^```[^\S\r\n]*[a-z]*(?:\n(?!```$).*)*\n```'
+            regex_func_calls = 'get_[\w_]+\n+\{\S.*\}\n+'
+            regex_unused_newline = r'(\n){2,}'
+            message.content = re.sub(regex_code_block, '', message.content, 0, re.MULTILINE)
+            message.content = re.sub(regex_func_calls, '', message.content)
+            message.content = re.sub(regex_unused_newline,'\n', message.content, 0, re.MULTILINE)
             if len(message.content) > 512:
                 message.content = message.content[:128]
         content += message.content
     if len(content) > max_length and len(messages) > 1:
-        return compress_message([ messages[0] ] + messages[3:], max_length)
+        return compress_message([ messages[0], *messages[3:] ], max_length)
     return messages

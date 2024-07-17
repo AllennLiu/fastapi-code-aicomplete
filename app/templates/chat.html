@@ -121,7 +121,7 @@
             }
             const help = await helpMessages()
             document.getElementById('messages').innerHTML = `
-            <li class="annoucement">
+            <li class="announcement">
                 <span class="avatar">🤖<div style="font-size: 15px; margin: 8px 20px 0 20px;">
                     您好，可以问我任何问题，或勾选【工具调用】后描述接近下列句子来调用工具！
                     <pre><code class="language-json">${JSON.stringify(help, null, 4)}</code></pre>
@@ -164,7 +164,10 @@
             const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
             tidyup.addEventListener('click', event => {
                 if (messages.innerHTML.trim() === '') return
-                confirm('请问是否要清除对话纪录？') && messages.querySelectorAll('li.user,li.assistant').forEach(e => e.remove())
+                if (confirm('请问是否要清除对话纪录？')) {
+                    history.length = 0
+                    messages.querySelectorAll('li.user,li.assistant').forEach(e => e.remove())
+                }
             })
             input.addEventListener('keydown', async event => event.keyCode === 13 && await sendMessage(event))
             const createStream = async () => {
