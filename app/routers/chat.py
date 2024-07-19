@@ -1,4 +1,4 @@
-import json, textwrap, datetime
+import json, copy, textwrap, datetime
 from operator import itemgetter
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
@@ -10,7 +10,7 @@ from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, I
 
 from ..config import get_settings
 from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, tw_to_cn
-from ..toolkit import run_func, func_called, remove_tool_calls, compress_message, SYSTEM_PROMPT, REGISTERED_TOOLS
+from ..toolkit import run_func, func_called, remove_tool_calls, compress_message, convert_message, SYSTEM_PROMPT, REGISTERED_TOOLS
 
 settings = get_settings()
 router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: { "description": "Not found" }})
@@ -47,7 +47,7 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
     in ``first system declared message`` or it even not exists ever."""
     prompt = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=chat_info.system or SYSTEM_PROMPT.content)
     if not chat_info.uuid:
-        messages = [ ChatMessage(**e) for e in chat_info.history ]
+        messages = convert_message(chat_info.history, ChatMessage)
         if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), chat_info.history)):
             messages[0: 0] = [ prompt ]
         return messages
@@ -70,7 +70,7 @@ def save_chat_history(chat_info: ChatInfo, messages: Iterable[ChatMessage]) -> N
     """Converting all the :class:`~ChatMessage` object to :class:`~dict`
     then save it to **Redis** with it owns user's ``uuid``."""
     if not chat_info.uuid: return
-    data = [ dict(role=m.role, content=m.content) for m in messages ]
+    data = convert_message(messages, dict)
     with RedisContextManager(settings.db.redis) as r:
         if chat_info.label:
             stringify = json.dumps(dict(**chat_info.label, history=data), ensure_ascii=False)
@@ -106,10 +106,11 @@ async def create_conversation(
 async def create_streaming(
     pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
 ) -> AsyncIterator[str]:
-    _messages = compress_message(messages, chat_info.max_length)
-    print(f' ~~~~~ Num => {len(_messages)} Len => {sum( len(m.content) for m in _messages )}')
+    copies = copy.deepcopy(convert_message(messages, dict))
+    compresses = compress_message(convert_message(copies, ChatMessage), chat_info.max_length)
+    print(f' ~~~~~ Num => {len(compresses)} Len => {sum( len(m.content) for m in compresses )}')
     streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
-        _messages,
+        compresses,
         **dict(p := ChatParam(**dict(chat_info))),
         do_sample=p.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
@@ -162,7 +163,7 @@ async def create_chat_conversation(
         return HTMLResponse(status_code=200, content=messages[-1].content)
     return JSONResponse(status_code=200, content=dict(
         response     = messages[-1].content,
-        history      = [ dict(role=e.role, content=e.content) for e in messages ],
+        history      = convert_message(messages, dict),
         datetime     = (now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
         elapsed_time = (now - begin).total_seconds()
     ))

@@ -1,5 +1,6 @@
 import re, opencc, textwrap, redis, string
 from functools import wraps
+from itertools import chain
 from contextlib import suppress
 from fastapi import WebSocketDisconnect
 from dataclasses import dataclass, field
@@ -158,7 +159,6 @@ def remove_punctuation(content: str) -> str:
     最後使用 :func:`~str.translate` 刪除文本中所有的**中英文標點符號**
     """
     punctuation = string.punctuation
-    punctuation += ''.join(chr(i) for i in range(0x3000, 0x303F))
-    punctuation += ''.join(chr(i) for i in range(0xFF00, 0xFFEF))
+    punctuation += ''.join(chr(i) for i in chain(range(0x3000, 0x303F), range(0xFF00, 0xFFEF)))
     translator = str.maketrans('', '', punctuation)
-    return content.translate(translator)
+    return re.sub(r'\s', '', content.translate(translator))

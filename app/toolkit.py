@@ -34,18 +34,19 @@ class Tools:
         """
         代码小帮手，语言: xxx，提示: xxx
         """
-        url = 'http://ares-ai.sit.ipt.inventec:7862/copilot/coding'
+        url = 'http://ares-ai.sit.ipt.inventec:7860/copilot/coding'
         headers = { "Content-Type": "application/json" }
-        data = {
-            "max_length": 512,
-            "top_k": 1,
-            "top_p": 0.95,
-            "temperature": 0.2,
-            "lang": language.capitalize(),
-            "prompt": prompt, "html": False
-        }
+        payload = json.dumps(dict(
+            max_length  = 512,
+            top_k       = 1,
+            top_p       = 0.95,
+            temperature = 0.2,
+            lang        = language.capitalize(),
+            prompt      = prompt,
+            html        = False
+        ))
         print(f'posting: {url}')
-        resp = requests.post(url, headers=headers, data=json.dumps(data), verify=False)
+        resp = requests.post(url, headers=headers, data=payload, verify=False)
         resp.raise_for_status()
         print(resp.json())
         return json.dumps(resp.json())
@@ -57,7 +58,7 @@ class Tools:
         """
         attrs = [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ]
         keys = { "current_condition": attrs }
-        resp = requests.get(f'https://wttr.in/{city_name}?format=j1')
+        resp = requests.get(f'https://wttr.in/{city_name}?format=j1', timeout=60)
         resp: dict = resp.json()
         return json.dumps({ k: { _v: resp[k][0][_v] for _v in keys[k] } for k in keys })
 
@@ -81,9 +82,11 @@ class Tools:
         return output
 
 def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str | bool]]]]:
-    """Parsing tool function calls by :class:`~staticmethod` \
-    of :class:`~Tools` object, it generate function document
-    and type hint of parameter to be system prompt definitions."""
+    """
+    Parsing tool function calls by :class:`~staticmethod` of\
+    :class:`~Tools` object, it generate function document and
+    type hint of parameter to be system prompt definitions.
+    """
     docs: List[Dict[str, str | List[Dict[str, str | bool]]]] = []
     for func in instance.__dict__.values():
         if not isinstance(func, staticmethod): continue
@@ -106,10 +109,13 @@ def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str |
 
 OBSERVATION_MAX_LENGTH = 1024
 REGISTERED_TOOLS = register_tool(Tools)
+TOOL_CALLS_KEYWORD = 'call tool:'
 
 def build_tool_system_prompt(content: str) -> ChatMessage:
-    """Appending all available :class:`~Tools` to system prompt message,
-    this method is fitting with the ``GLM-4`` model."""
+    """
+    Appending all available :class:`~Tools` to system prompt
+    message, this method is fitting with the ``GLM-4`` model.
+    """
     content += '\n\n# 可用工具'
     for tool in REGISTERED_TOOLS:
         content += f'\n\n## {tool["name"]}\n\n{json.dumps(tool, ensure_ascii=False, indent=4)}'
@@ -122,15 +128,20 @@ SYSTEM_PROMPT = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=textwrap.deden
 SYSTEM_TOOL_PROMPT = build_tool_system_prompt(SYSTEM_PROMPT.content)
 
 def func_called(message: ChatMessage) -> bool:
-    """Determine whether the first line of message content which name
-    is included in global variable `REGISTERED_TOOLS` that available
-    :class:`~Tools`."""
+    """
+    Determine whether the first line of message content which
+    name is included in global variable `REGISTERED_TOOLS`
+    that available :class:`~Tools`.
+    """
     return message.content.splitlines()[0] in map(itemgetter('name'), REGISTERED_TOOLS)
 
 def run_func(name: str, arguments: str) -> str:
-    """Run `observation` mode with assistant which function name or
-    arguments were been passed, finally it returns the **stringify**
-    :class:`~dict` response to next round of conversation."""
+    """
+    Run `observation` mode with assistant which function name
+    or arguments were been passed.
+    Finally, it returns the response of **stringify** :class:`~dict`
+    to next round conversation.
+    """
     print(f'Calling tool {name}, args: {arguments}')
     def tool_call(**kwargs: Any) -> Dict[str, Any]:
         return kwargs
@@ -145,24 +156,29 @@ def run_func(name: str, arguments: str) -> str:
         return traceback.format_exc()
 
 def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, None, None]:
-    """Removing wether the :class:`~ChatMessage` which is a role
-    of `observation` or `tool calls by assistant` then pop out of
-    the list."""
+    """
+    Removing wether the :class:`~ChatMessage` which is a role
+    of `observation` or `tool calls by assistant` then pop out
+    of the list.
+    """
     for message in messages:
         if message.role == ChatMessage.ROLE_OBSERVATION:
             continue
         elif message.role == ChatMessage.ROLE_ASSISTANT and func_called(message):
             continue
+        elif message.role == ChatMessage.ROLE_USER and TOOL_CALLS_KEYWORD in message.content:
+            message.content = re.sub(f'^{TOOL_CALLS_KEYWORD}', message.content, re.I)
         yield message
 
-def compress_message(messages: List[ChatMessage], max_length: int = 2048) -> List[ChatMessage]:
-    """When tool function has been called, the messages is going
-    to compress into **system prompt** + **the last message which
-    is function calls**.
+def compress_message(messages: List[ChatMessage] = [], max_length: int = 2048) -> List[ChatMessage]:
+    """
+    When tool function has been called, the messages is going to
+    compress into **system prompt** + **the last message which is
+    function calls**.
 
     Compress the each message recursively if the content length
     is large over than `max_length` then shift out the first two
-    items _(user + assistant)_ from the messages, at the mean time,
+    items _(user + assistant)_ from messages, at the mean time,
     these message being iterated to remove following contents:
     - Markdown code block including the context
     - Function calls name and passed arguments
@@ -170,8 +186,9 @@ def compress_message(messages: List[ChatMessage], max_length: int = 2048) -> Lis
 
     If a message content length is large over than ``512`` bytes,
     truncate it to ``128`` bytes before the content, it just for
-    collecting the characteristic of message content."""
-    if (re.search('call tool:', messages[-1].content, re.I)
+    collecting the characteristic of message content.
+    """
+    if (re.search(TOOL_CALLS_KEYWORD, messages[-1].content, re.I)
         or messages[-1].role == ChatMessage.ROLE_OBSERVATION):
         return [ SYSTEM_TOOL_PROMPT, messages[-1] ]
     content = ''
@@ -189,3 +206,15 @@ def compress_message(messages: List[ChatMessage], max_length: int = 2048) -> Lis
     if len(content) > max_length and len(messages) > 1:
         return compress_message([ messages[0], *messages[3:] ], max_length)
     return messages
+
+def convert_message(
+    messages: List[ChatMessage | Dict[str, str]], to_object: ChatMessage | dict
+) -> List[ChatMessage | Dict[str, str]]:
+    """
+    Converting each data between type is :class:`~ChatMessage` or
+    type is :class:`~dict` in messages.
+    """
+    return (
+        [ ChatMessage(**m) for m in messages ] if isinstance(to_object, type(ChatMessage))
+        else [ dict(role=m.role, content=m.content) for m in messages ]
+    )
