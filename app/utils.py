@@ -1,10 +1,15 @@
-import re, opencc, textwrap, redis, string
+import os, re, opencc, textwrap, redis, string, pymupdf
+from pathlib import Path
 from functools import wraps
 from itertools import chain
 from contextlib import suppress
-from fastapi import WebSocketDisconnect
+from docx import Document
+from pptx import Presentation
+from openpyxl import load_workbook
+from aiofiles import open as aopen
 from dataclasses import dataclass, field
-from typing import Any, Dict, Callable, TypeVar
+from fastapi import WebSocketDisconnect, UploadFile
+from typing import Any, Dict, Callable, Coroutine, TypeVar
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from transformers import AutoTokenizer, AutoModel, PreTrainedTokenizer, PreTrainedTokenizerFast
 
@@ -162,3 +167,31 @@ def remove_punctuation(content: str) -> str:
     punctuation += ''.join(chr(i) for i in chain(range(0x3000, 0x303F), range(0xFF00, 0xFFEF)))
     translator = str.maketrans('', '', punctuation)
     return re.sub(r'\s', '', content.translate(translator))
+
+async def file_to_text(file: UploadFile, uuid: str) -> Coroutine[None, None, str]:
+    """
+    異步存取文件，暫存 ``.pdf``、``.docx``、``.pptx``、``.xlsx``
+    文件為緩存至 `/tmp` 下，並依照對應文件副檔名讀取方法，轉換為
+    文本後刪除
+    """
+    file_path = f'/tmp/{uuid}{os.path.splitext(file.filename)[1]}'
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    async with aopen(file_path, 'wb') as out_file:
+        await out_file.write(await file.read())
+    if file_path.endswith('.pdf'):
+        content = ''.join(page.get_text() for page in pymupdf.open(file_path)).strip()
+    elif file_path.endswith('.docx'):
+        content = '\n'.join(paragraph.text for paragraph in Document(file_path).paragraphs)
+    elif file_path.endswith('.pptx'):
+        content = ''
+        for slide in Presentation(file_path).slides:
+            for shape in slide.shapes:
+                if hasattr(shape, 'text'):
+                    content += f'{shape.text}\n'
+    elif file_path.endswith('.xlsx'):
+        wb = load_workbook(file_path)
+        content = '\n'.join(','.join(map(str, filter(bool, row))) for row in wb.active.values)
+    else:
+        content = Path(file_path).read_text(encoding='utf-8', errors='ignore')
+    os.path.isfile(file_path) and os.remove(file_path)
+    return content.strip()

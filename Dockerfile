@@ -12,7 +12,7 @@ RUN apt update -y && apt install -yq gcc g++ make cmake vim curl git jq wget ssh
 
 RUN date && conda update --all
 
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir -r requirements.txt || true
 
 RUN echo 'alias vi="vim"' >> ~/.bashrc
@@ -26,4 +26,4 @@ ENV LANG              zh_CN.utf-8
 ENV LANGUAGE          zh_CN:zh:en_US:en
 ENV LOAD_MODEL_DEVICE cpu
 
-CMD ["bash", "service.sh"]
+CMD ["bash", "service.sh", "--prod"]

@@ -75,11 +75,11 @@ LANGUAGE_TAG: Dict[str, str] = {
     "Visual Basic" : "' language: Visual Basic"
 }
 DOTENV_CONFIG = os.path.join('app', '.env')
+FASTAPI_ENV = os.getenv('FASTAPI_ENV') or 'stag'
 HUB_PATH = '/root/.cache/huggingface/hub'
 
 class Database(BaseSettings):
-    redis: str = '10.99.104.251:8003'
-    # redis: str = '10.99.104.250:6379'
+    redis: str = '10.99.104.251:8003' if FASTAPI_ENV == 'stag' else '10.99.104.250:6379'
 
 class ModelConfig(BaseSettings):
     chatbot_name : str = '/workspace/glm-4-9b-chat'

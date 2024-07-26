@@ -1,3 +1,4 @@
+aiofiles
 fastapi
 uvicorn[standard]
 gunicorn
@@ -15,4 +16,9 @@ sentence_transformers>=2.7.0
 chatglm-cpp==0.4.0
 opencc-python-reimplemented==0.1.7
 redis
+markdown
 paramiko
+openpyxl
+pymupdf>=1.24.5
+python-docx>=1.1.2
+python-pptx>=0.6.23

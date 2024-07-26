@@ -1,15 +1,15 @@
-import json, copy, textwrap, datetime
+import json, copy, textwrap, datetime, markdown
 from operator import itemgetter
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
 from fastapi.templating import Jinja2Templates
-from fastapi import APIRouter, Request, WebSocket, Body, Path
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
 from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
 from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, Iterable
+from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, File, Form, Body, Path
 
 from ..config import get_settings
-from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, tw_to_cn
+from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, file_to_text, tw_to_cn
 from ..toolkit import run_func, func_called, remove_tool_calls, compress_message, convert_message, SYSTEM_PROMPT, REGISTERED_TOOLS
 
 settings = get_settings()
@@ -77,6 +77,12 @@ def save_chat_history(chat_info: ChatInfo, messages: Iterable[ChatMessage]) -> N
             r.hset(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime'), stringify)
         else:
             r.set(f'talk-history-{chat_info.uuid}', json.dumps(data, ensure_ascii=False))
+
+def save_chat_record(prompt: str, response: str) -> None:
+    with RedisContextManager(settings.db.redis) as r:
+        records: List[Dict[str, str]] = json.loads(r.get(f'talk-history-records') or '[]')
+        records.append(dict(user=prompt, assistant=response))
+        r.set(f'talk-history-records', json.dumps(records, ensure_ascii=False))
 
 async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
     """While the tool function is included in chat messages, it parsing
@@ -148,21 +154,21 @@ async def create_socket(
 @router.post('/conversation', response_model=None, response_description='Chat Conversation')
 async def create_chat_conversation(
     request: Request, chat_info: Annotated[ChatInfo, Body()]
-) -> HTMLResponse | JSONResponse:
+) -> JSONResponse:
     """
     Create a **Single Round** chat conversation.\n
     _(More parameters usage please refer to `Schema`)_
     """
     begin = datetime.datetime.now()
+    prompt = tw_to_cn.convert(chat_info.query)
     messages = merge_chat_history(chat_info)
-    messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=tw_to_cn.convert(chat_info.query)))
+    messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=prompt))
     messages = await create_conversation(request.app.chat.model, chat_info, messages)
     messages = list(remove_tool_calls(messages))
     save_chat_history(chat_info, messages)
-    if chat_info.html:
-        return HTMLResponse(status_code=200, content=messages[-1].content)
+    save_chat_record(prompt, content := messages[-1].content)
     return JSONResponse(status_code=200, content=dict(
-        response     = messages[-1].content,
+        response     = markdown.markdown(content) if chat_info.html else content,
         history      = convert_message(messages, dict),
         datetime     = (now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
         elapsed_time = (now - begin).total_seconds()
@@ -183,13 +189,43 @@ async def create_chat_stream(
     request: Request, chat_info: Annotated[ChatInfo, Body()]
 ) -> StreamingResponse:
     """
-    Create a **Single Round** streaming chat.\n
+    Create a **Multiple Round** streaming chat.\n
     _(More parameters usage please refer to `Schema`)_
     """
     messages = merge_chat_history(chat_info)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=tw_to_cn.convert(chat_info.query)))
     resp = create_streaming(request.app.chat.model, chat_info, messages)
     return StreamingResponse(resp, media_type='text/plain')
+
+@router.post('/file/stream', response_class=StreamingResponse, response_description='Streaming File')
+async def create_chat_file_stream(
+    request: Request,
+    uuid: Annotated[str, Form(..., description='User `UUID`')],
+    label: Annotated[str, Form(..., description='**Stringify** `JSON` label data')],
+    file: Annotated[UploadFile, File(description='A file read as UploadFile')],
+    system: Annotated[str, Form(description='`System` content')] = '你需要对用户输入的长文本内容进行解读'
+) -> StreamingResponse:
+    """
+    Create a **Multiple Round** file streaming analysis.
+    """
+    chat = ChatInfo(uuid=uuid, query=await file_to_text(file, uuid), label=json.loads(label), system=system)
+    if not chat.query:
+        raise HTTPException(status_code=422, detail='Invalid File Content')
+    async def stream(pipeline: Pipeline) -> AsyncIterator[str]:
+        messages = merge_chat_history(chat)
+        messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat.query))
+        streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
+            messages, **dict(ChatParam(**dict(chat))), do_sample=True, stream=True)
+        chunks: List[DeltaMessage] = []
+        for chunk in streaming:
+            chunks.append(chunk)
+            if pipeline.merge_streaming_messages(chunks).content.strip():
+                yield block_bad_words(chunk.content)
+                await asleep(.01)
+        messages.append(pipeline.merge_streaming_messages(chunks))
+        messages[-2].content = f'file=[{file.filename}] {messages[-2].content}'
+        save_chat_history(chat, messages)
+    return StreamingResponse(stream(request.app.chat.model), media_type='text/plain')
 
 @router.websocket('/ws')
 @websocket_catch
