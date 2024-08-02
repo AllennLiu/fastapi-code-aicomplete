@@ -26,4 +26,4 @@ ENV LANG              zh_CN.utf-8
 ENV LANGUAGE          zh_CN:zh:en_US:en
 ENV LOAD_MODEL_DEVICE cpu
 
-CMD ["bash", "service.sh", "--prod"]
+CMD ["bash", "service.sh", "--prod", "--chat", "--code", "--multi-modal"]

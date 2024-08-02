@@ -1,9 +1,18 @@
 import re, json, textwrap, traceback, requests, inspect, paramiko
+import numpy as np
+from PIL import Image
+from io import BytesIO
 from operator import itemgetter
 from chatglm_cpp import ChatMessage
 from pydantic import BaseModel
 from types import GenericAlias
-from typing import Any, Dict, List, Annotated, Callable, Generator, get_origin
+from typing import Any, Dict, List, Annotated, Callable, Coroutine, Generator, get_origin
+
+try:
+    from chatglm_cpp import Image as CImage
+except:
+    import chatglm_cpp
+    print(f'WARNING: module chatglm_cpp {chatglm_cpp.__version__} is not support the Image object yet.')
 
 class ToolBaseParam(BaseModel):
     name        : str
@@ -34,10 +43,10 @@ class Tools:
         """
         代码小帮手，语言: xxx，提示: xxx
         """
-        url = 'http://ares-ai.sit.ipt.inventec:7860/copilot/coding'
+        url = 'http://ares-copilot.sit.ipt.inventec:7860/copilot/coding'
         headers = { "Content-Type": "application/json" }
         payload = json.dumps(dict(
-            max_length  = 512,
+            max_length  = 1024,
             top_k       = 1,
             top_p       = 0.95,
             temperature = 0.2,
@@ -46,10 +55,13 @@ class Tools:
             html        = False
         ))
         print(f'posting: {url}')
-        resp = requests.post(url, headers=headers, data=payload, verify=False)
-        resp.raise_for_status()
-        print(resp.json())
-        return json.dumps(resp.json())
+        response = requests.post(url, headers=headers, data=payload, verify=False)
+        response.raise_for_status()
+        print(data := response.json())
+        return json.dumps(dict(
+            message = f'耗时：{round(data["elapsed_time"])}秒，请点击连结下载脚本',
+            url     = data.get('url')
+        ), ensure_ascii=False)
 
     @staticmethod
     def get_weather(city_name: Annotated[str, 'The name of the city to be queried', True]) -> str:
@@ -59,8 +71,10 @@ class Tools:
         attrs = [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ]
         keys = { "current_condition": attrs }
         resp = requests.get(f'https://wttr.in/{city_name}?format=j1', timeout=60)
-        resp: dict = resp.json()
-        return json.dumps({ k: { _v: resp[k][0][_v] for _v in keys[k] } for k in keys })
+        resp_json: dict = resp.json()
+        data = { k: { _v: resp_json[k][0][_v] for _v in keys[k] } for k in keys }
+        data["current_condition"] |= dict(city_name=city_name)
+        return json.dumps(data, ensure_ascii=False)
 
     @staticmethod
     def get_shell(
@@ -129,16 +143,15 @@ SYSTEM_TOOL_PROMPT = build_tool_system_prompt(SYSTEM_PROMPT.content)
 
 def func_called(message: ChatMessage) -> bool:
     """
-    Determine whether the first line of message content which
-    name is included in global variable `REGISTERED_TOOLS`
-    that available :class:`~Tools`.
+    Determine whether the first line of message content which name is
+    included in `REGISTERED_TOOLS` _(this available :class:`~Tools`)_.
     """
     return message.content.splitlines()[0] in map(itemgetter('name'), REGISTERED_TOOLS)
 
 def run_func(name: str, arguments: str) -> str:
     """
-    Run `observation` mode with assistant which function name
-    or arguments were been passed.
+    Run `observation` mode with assistant which function name or
+    arguments were been passed.
     Finally, it returns the response of **stringify** :class:`~dict`
     to next round conversation.
     """
@@ -155,11 +168,22 @@ def run_func(name: str, arguments: str) -> str:
     except Exception:
         return traceback.format_exc()
 
+async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
+    """
+    While the tool function is included in chat messages, it parsing
+    the contents to separate it into the function name and arguments,
+    then call the :func:`~run_func` to invoke specified function.
+    """
+    tool_call_contents = messages[-1].content.splitlines()
+    func_name, func_arg = tool_call_contents[0], '\n'.join(tool_call_contents[1:])
+    observation = run_func(func_name, func_arg)
+    messages.append(ChatMessage(role=ChatMessage.ROLE_OBSERVATION, content=observation))
+    return messages
+
 def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, None, None]:
     """
-    Removing wether the :class:`~ChatMessage` which is a role
-    of `observation` or `tool calls by assistant` then pop out
-    of the list.
+    Removing wether the :class:`~ChatMessage` which role is `observation`
+    or `tool calls by assistant` then pop out of the list.
     """
     for message in messages:
         if message.role == ChatMessage.ROLE_OBSERVATION:
@@ -167,7 +191,7 @@ def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, Non
         elif message.role == ChatMessage.ROLE_ASSISTANT and func_called(message):
             continue
         elif message.role == ChatMessage.ROLE_USER and TOOL_CALLS_KEYWORD in message.content:
-            message.content = re.sub(f'^{TOOL_CALLS_KEYWORD}', message.content, re.I)
+            message.content = re.sub(f'^{TOOL_CALLS_KEYWORD}', '', message.content, re.I)
         yield message
 
 def compress_message(messages: List[ChatMessage] = [], max_length: int = 2048) -> List[ChatMessage]:
@@ -218,3 +242,15 @@ def convert_message(
         [ ChatMessage(**m) for m in messages ] if isinstance(to_object, type(ChatMessage))
         else [ dict(role=m.role, content=m.content) for m in messages ]
     )
+
+def insert_image(message: ChatMessage, file_bytes: bytes) -> ChatMessage:
+    """
+    Converting the **image** :class:`~bytes` data to :class:`~CImage`\
+    object with ``RGB`` mode, and this object argument require type\
+    is the :class:`~np.ndarray` to be :class:`~chatglm_cpp.Image`\
+    _(:class:`~CImage`)_ buffer.
+
+    _(Using :class:`~chatglm_cpp.Image` require module ``chatglm_cpp>=0.4.1``)_
+    """
+    image = CImage(np.asarray(Image.open(BytesIO(file_bytes)).convert('RGB')))
+    return ChatMessage(role=message.role, content=message.content, image=image)

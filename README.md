@@ -4,7 +4,7 @@
 
 目前測試起來，**整體功能非常強大**，對於硬件環境沒那麼富裕的開發人員很友好 👀
 
-目前已整合了 `CodeGeeX2-6B` + `GLM-4-9B-Chat` 量化模型，使這 2 個由**清华大学 KEG 智谱**偉大的作品很好的合併使用！
+目前已整合了 `CodeGeeX2-6B` + `GLM-4-9B-Chat` + `GLM-4v-9B` 量化模型，使這 3 個由**清华大学 KEG 智谱**偉大的作品很好的合併使用！
 
 > **Docker** 鏡像來打包整個 **FastAPI** 服務成一個程序 *(包含模型文件大小 > `31G` )*
 >
@@ -20,10 +20,9 @@
 
 ![coding](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/a2b37382-2487-4f02-8b3d-3e2d505d7070)
 
-### 🤖 與聊天機器人互動 🔗 [http://127.0.0.1:7860/chat/demo](http://127.0.0.1:7860/chat/demo)
+### 🤖 與聊天機器人互動 🔗 [http://127.0.0.1:7860/chat/utils/demo](http://127.0.0.1:7860/chat/utils/demo)
 
 ![chatbot](https://github.com/AllennLiu/fastapi-code-aicomplete/assets/27174570/3fa83e23-ed30-4e25-9e02-4db364e48ebb)
-
 
 ---
 
@@ -41,6 +40,25 @@ docker run -tid -p 7861:22 -p 7860:7860 \
   -v /root/.ssh:/root/.ssh:ro \
   --ulimit nofile=65535 --privileged=true --restart=always \
   --name copilot seven6306/pretrained-model:ai-fastapi-glm4
+```
+
+手動啟動 **Web** 服務腳本
+
+```bash
+root@bec85164e078:/workspace# bash service.sh -h
+Usage: service.sh [Option] argv
+
+FastAPI backend service manager.
+
+Options:
+    -s, --ssh            serve with SSH server only
+    --kill, --terminate  terminate existing web process immediately
+    --stag, --test       serve environ with deployment
+    --prod, --main       serve environ with production
+    --chat               enable chat model
+    --code               enable code model
+    --multi-modal        enable multi modal model
+
 ```
 
 ---

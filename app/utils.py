@@ -1,4 +1,5 @@
-import os, re, opencc, textwrap, redis, string, pymupdf
+import os, re, opencc, textwrap, redis, string, pymupdf, torch
+from PIL import Image
 from pathlib import Path
 from functools import wraps
 from itertools import chain
@@ -11,7 +12,7 @@ from dataclasses import dataclass, field
 from fastapi import WebSocketDisconnect, UploadFile
 from typing import Any, Dict, Callable, Coroutine, TypeVar
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
-from transformers import AutoTokenizer, AutoModel, PreTrainedTokenizer, PreTrainedTokenizerFast
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer, PreTrainedTokenizerFast
 
 tw_to_cn = opencc.OpenCC('tw2sp')
 cn_to_tw = opencc.OpenCC('s2tw')
@@ -88,13 +89,14 @@ class RedisContextManager:
         if any(( type, value, traceback )):
             assert False, value
 
-def device(
-    model_name: str,
-    quantize  : int,
-    dtype     : str  = 'f32',
-    use_stream: bool = False,
-    device    : str  = 'cpu',
-    init_token: bool = True
+def load_llm(
+    name             : str,
+    quantize         : int,
+    dtype            : str  = 'f32',
+    transformers_only: bool = False,
+    device           : str  = 'cpu',
+    init_token       : bool = True,
+    **_              : Any
 ) -> tuple[PreTrainedTokenizer | PreTrainedTokenizerFast, chatglm_cpp.Pipeline]:
     """
     使用 :module:`~chatglm_cpp` 量化加速推理，實現通過 `CPU+MEM` 也能與
@@ -103,19 +105,21 @@ def device(
     - 量化精度：``fp32 > fp16 > int8 > int4`` 越小模型推理能力越差，但對於硬體要求就越低
     - 同上，``fp32`` 和 ``fp16`` 需在有 `GPU` 的設備上運行才能擁有正常的推理表現
     """
+    print(f'Loading LLM {name} quantize: {quantize} dtype: {dtype} ({device}) ...')
     pretrained_args = dict(trust_remote_code=True, local_files_only=True, device=device)
-    tokenizer = AutoTokenizer.from_pretrained(model_name, **pretrained_args) if init_token else None
-    if not use_stream:
+    tokenizer = AutoTokenizer.from_pretrained(name, **pretrained_args) if init_token else None
+    if not transformers_only:
         if enable_chatglm_cpp:
             print('Using chatglm-cpp to improve performance')
             if quantize in [ 4, 5, 8 ]:
                 dtype = f'q{quantize}_0'
-            pipeline = chatglm_cpp.Pipeline(model_name, dtype=dtype)
+            pipeline = chatglm_cpp.Pipeline(name, dtype=dtype)
             return ( tokenizer, pipeline )
         print('chatglm-cpp not enabled, falling back to transformers')
-
-    model = AutoModel.from_pretrained(model_name, **pretrained_args)
-    return ( tokenizer, model.eval() )
+    pretrained_args = dict(trust_remote_code=True, local_files_only=True, low_cpu_mem_usage=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        name, **pretrained_args, torch_dtype=torch.bfloat16)
+    return ( tokenizer, model.to(device).eval() )
 
 WEBSOCKET_T = TypeVar('WEBSOCKET_T')
 
@@ -145,8 +149,8 @@ def copilot_prompt(lang_tags: Dict[str, str], lang: str, prompt: str) -> tuple[s
 
     >>> ('# language: Python\\n# 幫我寫一個冒泡排序\\n', '#')
     """
-    comment_char = re.sub('\s+language:.*', '', lang_tags[lang])
-    result = f'{lang_tags[lang]}\n{comment_char} {tw_to_cn.convert(prompt)}\n'
+    comment_char = re.sub('\s+language:.*', '', lang_tags[lang]["mark"])
+    result = f'{lang_tags[lang]["mark"]}\n{comment_char} {tw_to_cn.convert(prompt)}\n'
     return ( result, comment_char )
 
 def block_bad_words(content: str) -> str:
@@ -168,7 +172,7 @@ def remove_punctuation(content: str) -> str:
     translator = str.maketrans('', '', punctuation)
     return re.sub(r'\s', '', content.translate(translator))
 
-async def file_to_text(file: UploadFile, uuid: str) -> Coroutine[None, None, str]:
+async def read_file(file: UploadFile, uuid: str) -> Coroutine[None, None, str]:
     """
     異步存取文件，暫存 ``.pdf``、``.docx``、``.pptx``、``.xlsx``
     文件為緩存至 `/tmp` 下，並依照對應文件副檔名讀取方法，轉換為
@@ -195,3 +199,14 @@ async def file_to_text(file: UploadFile, uuid: str) -> Coroutine[None, None, str
         content = Path(file_path).read_text(encoding='utf-8', errors='ignore')
     os.path.isfile(file_path) and os.remove(file_path)
     return content.strip()
+
+def verify_image(filename: str) -> bool:
+    """
+    檢查指定路徑文件是否為 :class:`~PIL.Image` 可識別的圖像格式
+    """
+    try:
+        with Image.open(filename) as img:
+            img.verify()
+            return True
+    except (IOError, SyntaxError):
+        return False

@@ -1,4 +1,4 @@
-from datetime import datetime
+import os, json, uuid, datetime
 from chatglm_cpp import Pipeline
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, WebSocket, HTTPException, Body
 from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
 
 from ..config import get_settings
-from ..utils import websocket_catch, copilot_prompt
+from ..utils import RedisContextManager, websocket_catch, copilot_prompt
 
 settings = get_settings()
 router = APIRouter(prefix='/copilot', tags=[ 'Copilot' ], responses={ 404: { "description": "Not found" } })
@@ -24,6 +24,25 @@ class Coding(CodingParam):
     prompt: str = Field(..., examples=[ 'Write a quick sort function' ], description='Describe program details')
     html: bool = Field(False, description='Response to `HTML` context directly')
 
+class Script(BaseModel):
+    code: str = ''
+    filename: str = ''
+    url: str = ''
+    created_at: str = '2024-07-29T14:35:04.380'
+    download_count: int = 0
+
+def save_code(base_url: str, lang: str, code: str) -> str:
+    """
+    Save the model generated code to `Redis` which is going to
+    be converted as the download **URL link** of API response.
+    """
+    data = Script(code=code, created_at=datetime.datetime.now().strftime('%FT%T'))
+    data.filename = (script_uuid := str(uuid.uuid4())) + f'.{settings.lang_tags[lang]["ext"]}'
+    data.url = os.path.join(base_url, 'file/download/script', script_uuid)
+    with RedisContextManager(settings.db.redis) as r:
+        r.hset('model-generated-scripts', script_uuid, json.dumps(dict(data)))
+    return data.url
+
 @router.post('/coding', response_model=None, response_description='Code AI Completion')
 def create_coding_task(
     request: Request, task: Annotated[Coding, Body()]
@@ -32,7 +51,7 @@ def create_coding_task(
     Create a **Single Round AI** programming which is like `Github Copilot` assistant.\n
     _(More parameters usage please refer to `Schema`)_
     """
-    begin = datetime.now()
+    begin = datetime.datetime.now()
     pipeline: Pipeline = request.app.copilot.model
     if not settings.lang_tags.get(task.lang):
         lang_tag = ', '.join(settings.lang_tags)
@@ -43,10 +62,11 @@ def create_coding_task(
     if task.html:
         return HTMLResponse(status_code=200, content=response)
     return JSONResponse(status_code=200, content=dict(
-        response     = response,
-        lang         = task.lang,
-        datetime     = (now := datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
-        elapsed_time = (now - begin).total_seconds()
+        response=response,
+        lang=task.lang,
+        datetime=(now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
+        elapsed_time=(now - begin).total_seconds(),
+        url=save_code(str(request.base_url), task.lang, response)
     ))
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Code')

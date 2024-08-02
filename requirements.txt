@@ -3,9 +3,9 @@ fastapi
 uvicorn[standard]
 gunicorn
 pydantic-settings==2.3.1
-torch==2.3.1
+torch>=2.3.0
 torchvision>=0.18.0
-transformers==4.40.0
+transformers>=4.42.4
 tabulate
 tqdm
 timm>=0.9.16
@@ -13,7 +13,7 @@ tiktoken>=0.7.0
 accelerate>=0.30.1
 sentencepiece>=0.2.0
 sentence_transformers>=2.7.0
-chatglm-cpp==0.4.0
+chatglm-cpp>=0.4.1
 opencc-python-reimplemented==0.1.7
 redis
 markdown

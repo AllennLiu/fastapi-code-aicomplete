@@ -1,30 +1,20 @@
-import json, copy, textwrap, datetime, markdown
+import json, copy, datetime, markdown
 from operator import itemgetter
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
-from fastapi.templating import Jinja2Templates
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
-from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, Iterable
-from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, File, Form, Body, Path
+from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, File, Form, Body
 
 from ..config import get_settings
-from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, file_to_text, tw_to_cn
-from ..toolkit import run_func, func_called, remove_tool_calls, compress_message, convert_message, SYSTEM_PROMPT, REGISTERED_TOOLS
+from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, read_file, tw_to_cn
+from ..toolkit import observe, func_called, remove_tool_calls, compress_message, convert_message, insert_image, SYSTEM_PROMPT
 
 settings = get_settings()
 router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: { "description": "Not found" }})
-PATH_UUID = Path(description='User `UUID`')
-PATH_DATE = Path(description='Tab created **datetime**')
-
-class ChatTab(BaseModel):
-    label    : str = ''
-    datetime : str = ''
-
-class ChatRename(BaseModel):
-    uuid: str = Field(..., description='User `UUID`')
-    name: str = Field(..., description='The `Tab Name` which is going to change')
-    datetime: str = Field(..., description='Tab created **datetime**')
+FORM_UUID = Form(..., description='User `UUID`')
+FORM_LABEL = Form(..., description='**Stringify** `JSON` label data')
 
 class ChatParam(BaseModel):
     max_length: int = Field(2500, le=2500, description='Response length maximum is `2500`')
@@ -41,10 +31,12 @@ class ChatInfo(ChatParam):
     html: bool = Field(False, description='Response to `HTML` context directly')
 
 def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
-    """Retrieving the conversation history by **Redis**, then convert
+    """
+    Retrieving the conversation history by **Redis**, then convert
     it as a list of type :class:`~ChatMessage` object.\n
     This function also to join the ``system prompt`` if it not exists
-    in ``first system declared message`` or it even not exists ever."""
+    in ``first system declared message`` or it even not exists ever.
+    """
     prompt = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=chat_info.system or SYSTEM_PROMPT.content)
     if not chat_info.uuid:
         messages = convert_message(chat_info.history, ChatMessage)
@@ -67,8 +59,10 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
     return messages or [ prompt ]
 
 def save_chat_history(chat_info: ChatInfo, messages: Iterable[ChatMessage]) -> None:
-    """Converting all the :class:`~ChatMessage` object to :class:`~dict`
-    then save it to **Redis** with it owns user's ``uuid``."""
+    """
+    Converting all the :class:`~ChatMessage` object to :class:`~dict`
+    then save it to **Redis** with it owns user's ``uuid``.
+    """
     if not chat_info.uuid: return
     data = convert_message(messages, dict)
     with RedisContextManager(settings.db.redis) as r:
@@ -84,23 +78,16 @@ def save_chat_record(prompt: str, response: str) -> None:
         records.append(dict(user=prompt, assistant=response))
         r.set(f'talk-history-records', json.dumps(records, ensure_ascii=False))
 
-async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
-    """While the tool function is included in chat messages, it parsing
-    the contents to separate it into the function name and arguments,
-    then call the :func:`~run_func` to invoke specified function."""
-    tool_call_contents = messages[-1].content.splitlines()
-    func_name, func_arg = tool_call_contents[0], '\n'.join(tool_call_contents[1:])
-    observation = run_func(func_name, func_arg)
-    messages.append(ChatMessage(role=ChatMessage.ROLE_OBSERVATION, content=observation))
-    return messages
-
 async def create_conversation(
     pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
 ) -> Coroutine[None, None, List[ChatMessage]]:
-    """Using ``chatglm_cpp`` to create a chat pipeline, it is going to
-    handling if tool function has been called by chatting message, then
-    response the observation recursively to chat again, let assistant
-    to assess tool function response and recommend user how to do."""
+    """
+    Using ``chatglm_cpp`` to create a chat pipeline, it is going to
+    handling if tool function has been called by chatting message,
+    then response the observation recursively and chat again, let
+    assistant to assess tool function response for recommending that
+    user how to do.
+    """
     response: ChatMessage = pipeline.chat(
         messages, **dict(p := ChatParam(**dict(chat_info))), do_sample=p.temperature > 0)
     response.content = block_bad_words(response.content).lstrip()
@@ -112,6 +99,11 @@ async def create_conversation(
 async def create_streaming(
     pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
 ) -> AsyncIterator[str]:
+    """
+    Similar as :func:`~create_conversation` the only difference is
+    that chat pipeline stream is being enabled, and it responses
+    the streaming generator for :class:`~StreamingResponse`.
+    """
     copies = copy.deepcopy(convert_message(messages, dict))
     compresses = compress_message(convert_message(copies, ChatMessage), chat_info.max_length)
     print(f' ~~~~~ Num => {len(compresses)} Len => {sum( len(m.content) for m in compresses )}')
@@ -136,8 +128,10 @@ async def create_streaming(
 async def create_socket(
     websocket: WebSocket, pipeline: Pipeline, messages: List[ChatMessage]
 ) -> Coroutine[None, None, List[ChatMessage]]:
-    """Similar as :func:`~create_conversation` the only difference is
-    that chat pipeline is created by streaming :class:`~WebSocket`."""
+    """
+    Similar as :func:`~create_conversation` the only difference is
+    that chat pipeline is created by streaming :class:`~WebSocket`.
+    """
     streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
         messages, **dict(p := ChatParam()), do_sample=p.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
@@ -174,10 +168,11 @@ async def create_chat_conversation(
         elapsed_time = (now - begin).total_seconds()
     ))
 
-@router.post('/subject', response_model=None, response_description='Chat Subject')
-async def get_chat_conversation_subject(
-    request: Request, chat_info: Annotated[ChatInfo, Body()]
-) -> JSONResponse:
+@router.post('/subject', response_model=None, response_description='Conversation Subject')
+async def get_chat_subject(request: Request, chat_info: Annotated[ChatInfo, Body()]) -> JSONResponse:
+    """
+    Get the chat **Conversation Subject** `within **10** words`.
+    """
     chat_info.query = f'10个字以内描述大意:{chat_info.query[:128]}'
     prompt = ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query)
     messages = await create_conversation(request.app.chat.model, chat_info, [ prompt ])
@@ -189,43 +184,66 @@ async def create_chat_stream(
     request: Request, chat_info: Annotated[ChatInfo, Body()]
 ) -> StreamingResponse:
     """
-    Create a **Multiple Round** streaming chat.\n
+    Create a stream of **Multiple Round** conversations.\n
     _(More parameters usage please refer to `Schema`)_
     """
+    chat_info.query = tw_to_cn.convert(chat_info.query)
     messages = merge_chat_history(chat_info)
-    messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=tw_to_cn.convert(chat_info.query)))
-    resp = create_streaming(request.app.chat.model, chat_info, messages)
-    return StreamingResponse(resp, media_type='text/plain')
+    messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query))
+    return StreamingResponse(create_streaming(
+        request.app.chat.model, chat_info, messages), media_type='text/plain')
+
+async def file_stream(
+    pipeline: Pipeline, chat: ChatInfo, messages: List[ChatMessage], tag: str, file: UploadFile
+) -> AsyncIterator[str]:
+    chat.query = tw_to_cn.convert(chat.query)
+    streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
+        messages, **dict(ChatParam(**dict(chat))), do_sample=True, stream=True)
+    chunks: List[DeltaMessage] = []
+    for chunk in streaming:
+        chunks.append(chunk)
+        if pipeline.merge_streaming_messages(chunks).content.strip():
+            yield block_bad_words(chunk.content)
+            await asleep(.01)
+    messages.append(pipeline.merge_streaming_messages(chunks))
+    messages[-2].content = f'{tag}=[{file.filename}] {messages[-2].content}'
+    save_chat_history(chat, messages)
 
 @router.post('/file/stream', response_class=StreamingResponse, response_description='Streaming File')
 async def create_chat_file_stream(
     request: Request,
-    uuid: Annotated[str, Form(..., description='User `UUID`')],
-    label: Annotated[str, Form(..., description='**Stringify** `JSON` label data')],
+    uuid: Annotated[str, FORM_UUID],
+    label: Annotated[str, FORM_LABEL],
     file: Annotated[UploadFile, File(description='A file read as UploadFile')],
     system: Annotated[str, Form(description='`System` content')] = '你需要对用户输入的长文本内容进行解读'
 ) -> StreamingResponse:
     """
-    Create a **Multiple Round** file streaming analysis.
+    Create a stream of **Multiple Round** file analysis.
     """
-    chat = ChatInfo(uuid=uuid, query=await file_to_text(file, uuid), label=json.loads(label), system=system)
+    chat = ChatInfo(uuid=uuid, query=await read_file(file, uuid), label=json.loads(label), system=system)
     if not chat.query:
         raise HTTPException(status_code=422, detail='Invalid File Content')
-    async def stream(pipeline: Pipeline) -> AsyncIterator[str]:
-        messages = merge_chat_history(chat)
-        messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat.query))
-        streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
-            messages, **dict(ChatParam(**dict(chat))), do_sample=True, stream=True)
-        chunks: List[DeltaMessage] = []
-        for chunk in streaming:
-            chunks.append(chunk)
-            if pipeline.merge_streaming_messages(chunks).content.strip():
-                yield block_bad_words(chunk.content)
-                await asleep(.01)
-        messages.append(pipeline.merge_streaming_messages(chunks))
-        messages[-2].content = f'file=[{file.filename}] {messages[-2].content}'
-        save_chat_history(chat, messages)
-    return StreamingResponse(stream(request.app.chat.model), media_type='text/plain')
+    messages = merge_chat_history(chat)
+    messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat.query))
+    return StreamingResponse(file_stream(
+        request.app.chat.model, chat, messages, 'file', file), media_type='text/plain')
+
+@router.post('/image/stream', response_class=StreamingResponse, response_description='Streaming Image')
+async def create_chat_image_stream(
+    request: Request,
+    uuid: Annotated[str, FORM_UUID],
+    label: Annotated[str, FORM_LABEL],
+    image: Annotated[UploadFile, File(description='A image read as UploadFile')],
+    query: Annotated[str, Form(description='Message content')] = '请描述这张图片'
+) -> StreamingResponse:
+    """
+    Create a stream of **Multiple Round** image analysis.
+    """
+    chat = ChatInfo(uuid=uuid, query=query, label=json.loads(label))
+    messages = [ *merge_chat_history(chat), ChatMessage(role=ChatMessage.ROLE_USER, content=query) ]
+    messages[-1] = insert_image(messages[-1], await image.read())
+    return StreamingResponse(file_stream(
+        request.app.multi_modal.model, chat, messages, 'image', image), media_type='text/plain')
 
 @router.websocket('/ws')
 @websocket_catch
@@ -239,65 +257,3 @@ async def create_chat_websocket(websocket: WebSocket):
         await websocket.send_json(dict(content=messages[-1].content, completion=True))
         await asleep(1)
         messages = list(remove_tool_calls(messages))
-
-@router.get('/demo', response_class=HTMLResponse, include_in_schema=False)
-async def render_chat_demo(request: Request) -> HTMLResponse:
-    template = Jinja2Templates(directory='./app/templates')
-    return template.TemplateResponse('chat.html', context=dict(request=request))
-
-@router.get('/help')
-async def show_toolkit() -> JSONResponse:
-    resp = list(map(itemgetter('description'), REGISTERED_TOOLS))
-    return JSONResponse(status_code=200, content=resp)
-
-@router.get('/tabs/{uuid}')
-async def get_chat_tabs(uuid: Annotated[str, Path(description='User `UUID`')]) -> JSONResponse:
-    with RedisContextManager(settings.db.redis) as r:
-        name = f'talk-history-hash-{uuid}'
-        tabs = [ dict(ChatTab(**json.loads(r.hget(name, k) or '{}'))) for k in r.hkeys(name) ]
-    resp = sorted(tabs, key=itemgetter('datetime'), reverse=True)
-    return JSONResponse(status_code=200, content=resp)
-
-@router.put('/tab/rename')
-async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body()]) -> JSONResponse:
-    with RedisContextManager(settings.db.redis) as r:
-        args = ( f'talk-history-hash-{chat_tab.uuid}', chat_tab.datetime )
-        data = json.loads(r.hget(*args) or '{}') | dict(label=chat_tab.name)
-        r.hset(*args, json.dumps(data, ensure_ascii=False))
-        resp = dict(ChatTab(**json.loads(r.hget(*args))))
-    return JSONResponse(status_code=200, content=resp)
-
-@router.get('/history/{uuid}/{datetime}')
-async def get_chat_history_by_datetime(
-    uuid: Annotated[str, PATH_UUID], datetime: Annotated[str, PATH_DATE]
-) -> JSONResponse:
-    with RedisContextManager(settings.db.redis) as r:
-        data = json.loads(r.hget(f'talk-history-hash-{uuid}', datetime) or '{}')
-    return JSONResponse(status_code=200, content=data.get('history', []))
-
-@router.delete('/history/{uuid}/{datetime}')
-async def delete_chat_history_by_datetime(
-    uuid: Annotated[str, PATH_UUID], datetime: Annotated[str, PATH_DATE]
-) -> JSONResponse:
-    with RedisContextManager(settings.db.redis) as r:
-        args = ( f'talk-history-hash-{uuid}', datetime )
-        r.hdel(*args)
-        resp = dict(ok=r.hget(*args) is None)
-    return JSONResponse(status_code=200, content=resp)
-
-@router.delete('/forget/{uuid}/{range}')
-async def clean_chat_history(
-    uuid : Annotated[str, PATH_UUID],
-    range: Annotated[int, Path(description=textwrap.dedent("""\
-    Chat history **forget range**: the range of `pair entry` is **count from the end**\n
-    **Pair entry** means the history which is the role both of user and assistant.
-    - `0 = let it go` _(all the history)_
-    - `-1 = the last one`
-    - `-2 = the last two`
-    - and so on ...
-    """))]
-) -> JSONResponse:
-    with RedisContextManager(settings.db.redis) as r:
-        history: List[Dict[str, str]] = json.loads(r.get(f'talk-history-{uuid}') or '[]')
-        r.set(f'talk-history-{uuid}', json.dumps(history[: range * 2], ensure_ascii=False))
-    return JSONResponse(status_code=200, content=dict(ok=True))

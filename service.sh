@@ -21,10 +21,13 @@ Usage: $0 [Option] argv
 FastAPI backend service manager.
 
 Options:
-    -s, --ssh              serve with SSH server only
-    --kill, --terminate    terminate existing web process immediately
-    --stag, --test  serve environ with deployment
-    --prod, --main  serve environ with production
+    -s, --ssh            serve with SSH server only
+    --kill, --terminate  terminate existing web process immediately
+    --stag, --test       serve environ with deployment
+    --prod, --main       serve environ with production
+    --chat               enable chat model
+    --code               enable code model
+    --multi-modal        enable multi modal model
 
 EOF
     exit 0
@@ -58,6 +61,8 @@ function server_forever
 function main
 {
     config_sshd
+    [ -z "$MODE_CHATBOT" -a -z "$MODE_CODE" -a -z "$MODE_MULTIMODAL" ] && \
+        echo "Please specify an option for enabling at least one of model." && exit 1
     gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT -t 300 \
         --worker-connections 1 --reload -w $WORKER_NUM -k uvicorn.workers.UvicornWorker
     exit 0
@@ -85,6 +90,15 @@ do
         --prod|--main)
             export FASTAPI_ENV=prod
             WORKER_NUM=4
+            ;;
+        --chat)
+            export MODE_CHATBOT=true
+            ;;
+        --code)
+            export MODE_CODE=true
+            ;;
+        --multi-modal)
+            export MODE_MULTIMODAL=true
             ;;
         * ) echo "Invalid arguments, try '-h/--help' for more information."
             exit 1
