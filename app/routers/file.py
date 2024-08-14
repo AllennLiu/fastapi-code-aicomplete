@@ -1,7 +1,7 @@
 import json
-from typing import Dict, Annotated
-from starlette.responses import StreamingResponse
 from fastapi import APIRouter, HTTPException, Path
+from typing import Dict, List, Annotated, Generator
+from starlette.responses import PlainTextResponse, StreamingResponse
 
 from ..config import get_settings
 from ..utils import RedisContextManager
@@ -24,3 +24,16 @@ def get_model_generated_script(uuid: Annotated[str, PATH_UUID]) -> StreamingResp
     resp = StreamingResponse(query.get('code', ''), media_type='text/plain')
     resp.headers["Content-Disposition"] = f"attachment; filename={filename}; filename*=utf-8''{filename}"
     return resp
+
+@router.get('/tool/list', response_class=PlainTextResponse)
+def get_tool_list() -> PlainTextResponse:
+    def flatten(items: List[dict]) -> Generator[str, None, None]:
+        for file in items:
+            if isinstance(file.get('children', ''), list):
+                yield from flatten(file["children"])
+            else:
+                if file.get('title'): yield file.get('title')
+    with RedisContextManager(settings.db.redis) as r:
+        scripts: List[str] = r.hkeys('gitlab-script-list')
+        collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
+    return '\n'.join(scripts + list(flatten(collections.get('children', []))))

@@ -7,8 +7,8 @@ from fastapi import APIRouter, Request, Body, Path
 from starlette.responses import JSONResponse, HTMLResponse
 
 from ..config import get_settings
+from ..chats import REGISTERED_TOOLS
 from ..utils import RedisContextManager
-from ..toolkit import REGISTERED_TOOLS
 
 settings = get_settings()
 router = APIRouter(prefix='/chat/utils', tags=[ 'Chat Utils' ], responses={ 404: { "description": "Not found" }})

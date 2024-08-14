@@ -1,21 +1,15 @@
-import os, re, opencc, textwrap, redis, string, pymupdf, torch
+import os, re, opencc, pathlib, aiofiles, textwrap, redis, string, pymupdf, torch
 from PIL import Image
-from pathlib import Path
-from functools import wraps
 from itertools import chain
-from contextlib import suppress
 from docx import Document
 from pptx import Presentation
 from openpyxl import load_workbook
-from aiofiles import open as aopen
+from fastapi import UploadFile
 from dataclasses import dataclass, field
-from fastapi import WebSocketDisconnect, UploadFile
-from typing import Any, Dict, Callable, Coroutine, TypeVar
-from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+from typing import Any, Dict, Coroutine, Iterable
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizer, PreTrainedTokenizerFast
 
-tw_to_cn = opencc.OpenCC('tw2sp')
-cn_to_tw = opencc.OpenCC('s2tw')
+tw_to_cn, cn_to_tw = opencc.OpenCC('tw2sp'), opencc.OpenCC('s2tw')
 
 try:
     import chatglm_cpp
@@ -121,27 +115,6 @@ def load_llm(
         name, **pretrained_args, torch_dtype=torch.bfloat16)
     return ( tokenizer, model.to(device).eval() )
 
-WEBSOCKET_T = TypeVar('WEBSOCKET_T')
-
-def websocket_catch(func: Callable[..., WEBSOCKET_T]) -> Callable[..., WEBSOCKET_T]:
-    """
-    The main caveat of this method is that route can't
-    access the request object in the wrapper and this
-    primary intention of websocket exception purpose.
-
-    由於裝飾器 (`decorator`) 會接收一個函數當參數，然後返
-    回新的函數，這樣會導致被包裝函數的名子與注釋消失，如此
-    便需要使用 :func:`~functools.wraps` 裝飾子修正
-
-    函數的名子與注釋：`func.__name__`、`func.__doc__`
-    """
-    @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> WEBSOCKET_T | None:
-        exceptions = ( WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK, Exception )
-        with suppress(*exceptions):
-            return await func(*args, **kwargs)
-    return wrapper
-
 def copilot_prompt(lang_tags: Dict[str, str], lang: str, prompt: str) -> tuple[str, str]:
     """
     依指定代碼語言來擷取注釋符號，連接 prompt 生成代碼描述\n
@@ -172,6 +145,23 @@ def remove_punctuation(content: str) -> str:
     translator = str.maketrans('', '', punctuation)
     return re.sub(r'\s', '', content.translate(translator))
 
+def set_similarity(array1: Iterable[str], array2: Iterable[str]) -> tuple[set, float]:
+    """
+    不同長度數組，計算 ``交集長度 / 並集長度 = 單詞數組相似度 (%)``
+
+    最後返回 `元組(交集, 相似度比例)`
+
+    Examples
+    -------
+    ```
+    set_similarity(['升级','测试', 'REDFISH'], ['用户', '命令', '升级', 'redfish'])
+    ```
+    >>> ({'redfish', '升级'}, 40.0)
+    """
+    x, y = set(map(str.lower, array1)), set(map(str.lower, array2))
+    intersections: set[str] = x.intersection(y)
+    return intersections, round((len(intersections) / len(x.union(y))) * 100, 2)
+
 async def read_file(file: UploadFile, uuid: str) -> Coroutine[None, None, str]:
     """
     異步存取文件，暫存 ``.pdf``、``.docx``、``.pptx``、``.xlsx``
@@ -180,7 +170,7 @@ async def read_file(file: UploadFile, uuid: str) -> Coroutine[None, None, str]:
     """
     file_path = f'/tmp/{uuid}{os.path.splitext(file.filename)[1]}'
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    async with aopen(file_path, 'wb') as out_file:
+    async with aiofiles.open(file_path, 'wb') as out_file:
         await out_file.write(await file.read())
     if file_path.endswith('.pdf'):
         content = ''.join(page.get_text() for page in pymupdf.open(file_path)).strip()
@@ -196,7 +186,7 @@ async def read_file(file: UploadFile, uuid: str) -> Coroutine[None, None, str]:
         wb = load_workbook(file_path)
         content = '\n'.join(','.join(map(str, filter(bool, row))) for row in wb.active.values)
     else:
-        content = Path(file_path).read_text(encoding='utf-8', errors='ignore')
+        content = pathlib.Path(file_path).read_text(encoding='utf-8', errors='ignore')
     os.path.isfile(file_path) and os.remove(file_path)
     return content.strip()
 

@@ -8,7 +8,8 @@ from fastapi import APIRouter, Request, WebSocket, HTTPException, Body
 from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
 
 from ..config import get_settings
-from ..utils import RedisContextManager, websocket_catch, copilot_prompt
+from ..catch import load_model_catch, websocket_catch
+from ..utils import RedisContextManager, copilot_prompt
 
 settings = get_settings()
 router = APIRouter(prefix='/copilot', tags=[ 'Copilot' ], responses={ 404: { "description": "Not found" } })
@@ -44,7 +45,8 @@ def save_code(base_url: str, lang: str, code: str) -> str:
     return data.url
 
 @router.post('/coding', response_model=None, response_description='Code AI Completion')
-def create_coding_task(
+@load_model_catch
+async def create_coding_task(
     request: Request, task: Annotated[Coding, Body()]
 ) -> HTMLResponse | JSONResponse:
     """
@@ -70,6 +72,7 @@ def create_coding_task(
     ))
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Code')
+@load_model_catch
 async def create_coding_stream(request: Request, task: Annotated[Coding, Body()]) -> StreamingResponse:
     """
     Create a **Single Round AI** programming stream which is like `Github Copilot` assistant.\n
@@ -82,6 +85,7 @@ async def create_coding_stream(request: Request, task: Annotated[Coding, Body()]
     return StreamingResponse(streaming, media_type='text/plain')
 
 @router.websocket('/ws')
+@load_model_catch
 @websocket_catch
 async def create_coding_socket(
     websocket : WebSocket,

@@ -1,6 +1,5 @@
-import os
+import os, textwrap
 from typing import Dict
-from textwrap import dedent
 from functools import lru_cache
 from starlette.config import Config
 from pydantic_settings import BaseSettings
@@ -105,8 +104,8 @@ class ModelConfig(BaseSettings):
     multi_modal : MultiModal = MultiModal()
 
 class Settings(BaseSettings):
-    app_name  : str = 'Powerful API with 🇦🇮 🤖'
-    desc      : str = dedent("""\
+    app_name : str = 'Powerful API with 🇦🇮 🤖'
+    desc     : str = textwrap.dedent("""\
         Integrating as following **`LLM`** models to implement **Useful API** to community:
 
         - **`CodeGeeX2-6B`** 🔗 [https://github.com/THUDM/CodeGeeX2](https://github.com/THUDM/CodeGeeX2)
@@ -124,11 +123,12 @@ class Settings(BaseSettings):
 
         #### 🎮 Just enjoy it !\
         """)
-    lang_tags : Dict[str, Dict[str, str]] = LANGUAGE_TAG
-    private   : Config = Config(DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None)
-    models    : ModelConfig = ModelConfig()
-    db        : Database = Database()
-    load_dev  : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
+    lang_tags  : Dict[str, Dict[str, str]] = LANGUAGE_TAG
+    private    : Config = Config(DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None)
+    models     : ModelConfig = ModelConfig()
+    db         : Database = Database()
+    load_dev   : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
+    ssl_active : bool = (os.getenv('SERVE_HTTPS') or '').lower() == 'true'
 
 @lru_cache
 def get_settings():

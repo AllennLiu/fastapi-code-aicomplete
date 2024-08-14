@@ -1,6 +1,4 @@
-import json, copy, datetime, markdown
-from operator import itemgetter
-from asyncio import sleep as asleep
+import json, copy, asyncio, datetime, markdown, operator, contextlib
 from pydantic import BaseModel, Field
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
 from starlette.responses import JSONResponse, StreamingResponse
@@ -8,8 +6,9 @@ from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, I
 from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, File, Form, Body
 
 from ..config import get_settings
-from ..utils import RedisContextManager, websocket_catch, block_bad_words, remove_punctuation, read_file, tw_to_cn
-from ..toolkit import observe, func_called, remove_tool_calls, compress_message, convert_message, insert_image, SYSTEM_PROMPT
+from ..catch import load_model_catch, websocket_catch
+from ..utils import RedisContextManager, block_bad_words, remove_punctuation, read_file, tw_to_cn
+from ..chats import observe, func_called, remove_tool_calls, compress_message, convert_message, insert_image, SYSTEM_PROMPT
 
 settings = get_settings()
 router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: { "description": "Not found" }})
@@ -40,7 +39,7 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
     prompt = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=chat_info.system or SYSTEM_PROMPT.content)
     if not chat_info.uuid:
         messages = convert_message(chat_info.history, ChatMessage)
-        if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), chat_info.history)):
+        if ChatMessage.ROLE_SYSTEM not in set(map(operator.itemgetter('role'), chat_info.history)):
             messages[0: 0] = [ prompt ]
         return messages
     messages: List[ChatMessage] = []
@@ -54,7 +53,7 @@ def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
         if history["role"] == ChatMessage.ROLE_SYSTEM and prompt.content not in history["content"]:
             history |= dict(content=prompt.content + history["content"])
         messages.append(ChatMessage(**history))
-    if ChatMessage.ROLE_SYSTEM not in set(map(itemgetter('role'), histories)):
+    if ChatMessage.ROLE_SYSTEM not in set(map(operator.itemgetter('role'), histories)):
         messages[0: 0] = [ prompt ]
     return messages or [ prompt ]
 
@@ -97,33 +96,59 @@ async def create_conversation(
     return messages
 
 async def create_streaming(
-    pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
+    request: Request, chat_info: ChatInfo, messages: List[ChatMessage]
 ) -> AsyncIterator[str]:
     """
     Similar as :func:`~create_conversation` the only difference is
     that chat pipeline stream is being enabled, and it responses
     the streaming generator for :class:`~StreamingResponse`.
     """
+    pipeline: Pipeline = request.app.chatbot.model
     copies = copy.deepcopy(convert_message(messages, dict))
-    compresses = compress_message(convert_message(copies, ChatMessage), chat_info.max_length)
+    compresses = compress_message(convert_message(copies, ChatMessage), pipeline, chat_info.max_length)
     print(f' ~~~~~ Num => {len(compresses)} Len => {sum( len(m.content) for m in compresses )}')
     streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
         compresses,
         **dict(p := ChatParam(**dict(chat_info))),
         do_sample=p.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
-    for chunk in streaming:
-        chunks.append(chunk)
-        if pipeline.merge_streaming_messages(chunks).content.strip():
-            yield block_bad_words(chunk.content)
-            await asleep(.01)
+    with contextlib.suppress(asyncio.CancelledError):
+        for chunk in streaming:
+            chunks.append(chunk)
+            if pipeline.merge_streaming_messages(chunks).content.strip():
+                yield block_bad_words(chunk.content)
+                await asyncio.sleep(.01)
     messages.append(pipeline.merge_streaming_messages(chunks))
     if func_called(messages[-1]):
         yield '\n\n'
-        async for chunk in create_streaming(pipeline, chat_info, await observe(messages)):
-            yield chunk
-            await asleep(.01)
+        with contextlib.suppress(asyncio.CancelledError):
+            async for chunk in create_streaming(request, chat_info, await observe(messages)):
+                yield chunk
+                await asyncio.sleep(.01)
     save_chat_history(chat_info, remove_tool_calls(messages))
+
+async def file_stream(
+    request: Request,
+    pipeline: Pipeline,
+    chat: ChatInfo,
+    messages: List[ChatMessage],
+    tag: str,
+    file: UploadFile
+) -> AsyncIterator[str]:
+    chat.query = tw_to_cn.convert(chat.query)
+    streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
+        messages, **dict(ChatParam(**dict(chat))), do_sample=True, stream=True)
+    chunks: List[DeltaMessage] = []
+    with contextlib.suppress(asyncio.CancelledError):
+        for chunk in streaming:
+            chunks.append(chunk)
+            if await request.is_disconnected(): break
+            if pipeline.merge_streaming_messages(chunks).content.strip():
+                yield block_bad_words(chunk.content)
+                await asyncio.sleep(.01)
+    messages.append(pipeline.merge_streaming_messages(chunks))
+    messages[-2].content = f'{tag}=[{file.filename}] {messages[-2].content}'
+    save_chat_history(chat, messages)
 
 async def create_socket(
     websocket: WebSocket, pipeline: Pipeline, messages: List[ChatMessage]
@@ -135,11 +160,13 @@ async def create_socket(
     streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
         messages, **dict(p := ChatParam()), do_sample=p.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
-    for chunk in streaming:
-        chunks.append(chunk)
-        if (content := pipeline.merge_streaming_messages(chunks).content).strip():
-            await websocket.send_json(dict(content=block_bad_words(content).lstrip(), completion=False))
-            await asleep(.01)
+    with contextlib.suppress(asyncio.CancelledError):
+        for chunk in streaming:
+            chunks.append(chunk)
+            if (content := pipeline.merge_streaming_messages(chunks).content).strip():
+                await websocket.send_json(dict(
+                    content=block_bad_words(content).lstrip(), completion=False))
+                await asyncio.sleep(.01)
     messages.append(pipeline.merge_streaming_messages(chunks))
     if func_called(messages[-1]):
         return await create_socket(websocket, await observe(messages))
@@ -157,7 +184,7 @@ async def create_chat_conversation(
     prompt = tw_to_cn.convert(chat_info.query)
     messages = merge_chat_history(chat_info)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=prompt))
-    messages = await create_conversation(request.app.chat.model, chat_info, messages)
+    messages = await create_conversation(request.app.chatbot.model, chat_info, messages)
     messages = list(remove_tool_calls(messages))
     save_chat_history(chat_info, messages)
     save_chat_record(prompt, content := messages[-1].content)
@@ -173,13 +200,15 @@ async def get_chat_subject(request: Request, chat_info: Annotated[ChatInfo, Body
     """
     Get the chat **Conversation Subject** `within **10** words`.
     """
-    chat_info.query = f'10个字以内描述大意:{chat_info.query[:128]}'
-    prompt = ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query)
-    messages = await create_conversation(request.app.chat.model, chat_info, [ prompt ])
-    resp = dict(subject=remove_punctuation(messages[-1].content).capitalize()[:10])
+    chat_info.system = '用户将输入一段文本，你需要用不含标点符号中英文加起来共 10 个字以内来描述大意！'
+    messages = [ ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=chat_info.system) ]
+    messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query[:128]))
+    subjects = await create_conversation(request.app.chatbot.model, chat_info, messages)
+    resp = dict(subject=remove_punctuation(subjects[-1].content).capitalize()[:10])
     return JSONResponse(status_code=200, content=resp)
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Chat')
+@load_model_catch
 async def create_chat_stream(
     request: Request, chat_info: Annotated[ChatInfo, Body()]
 ) -> StreamingResponse:
@@ -190,26 +219,10 @@ async def create_chat_stream(
     chat_info.query = tw_to_cn.convert(chat_info.query)
     messages = merge_chat_history(chat_info)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query))
-    return StreamingResponse(create_streaming(
-        request.app.chat.model, chat_info, messages), media_type='text/plain')
-
-async def file_stream(
-    pipeline: Pipeline, chat: ChatInfo, messages: List[ChatMessage], tag: str, file: UploadFile
-) -> AsyncIterator[str]:
-    chat.query = tw_to_cn.convert(chat.query)
-    streaming: Generator[DeltaMessage, None, None] = pipeline.chat(
-        messages, **dict(ChatParam(**dict(chat))), do_sample=True, stream=True)
-    chunks: List[DeltaMessage] = []
-    for chunk in streaming:
-        chunks.append(chunk)
-        if pipeline.merge_streaming_messages(chunks).content.strip():
-            yield block_bad_words(chunk.content)
-            await asleep(.01)
-    messages.append(pipeline.merge_streaming_messages(chunks))
-    messages[-2].content = f'{tag}=[{file.filename}] {messages[-2].content}'
-    save_chat_history(chat, messages)
+    return StreamingResponse(create_streaming(request, chat_info, messages), media_type='text/plain')
 
 @router.post('/file/stream', response_class=StreamingResponse, response_description='Streaming File')
+@load_model_catch
 async def create_chat_file_stream(
     request: Request,
     uuid: Annotated[str, FORM_UUID],
@@ -226,9 +239,10 @@ async def create_chat_file_stream(
     messages = merge_chat_history(chat)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat.query))
     return StreamingResponse(file_stream(
-        request.app.chat.model, chat, messages, 'file', file), media_type='text/plain')
+        request, request.app.chatbot.model, chat, messages, 'file', file), media_type='text/plain')
 
 @router.post('/image/stream', response_class=StreamingResponse, response_description='Streaming Image')
+@load_model_catch
 async def create_chat_image_stream(
     request: Request,
     uuid: Annotated[str, FORM_UUID],
@@ -243,9 +257,10 @@ async def create_chat_image_stream(
     messages = [ *merge_chat_history(chat), ChatMessage(role=ChatMessage.ROLE_USER, content=query) ]
     messages[-1] = insert_image(messages[-1], await image.read())
     return StreamingResponse(file_stream(
-        request.app.multi_modal.model, chat, messages, 'image', image), media_type='text/plain')
+        request, request.app.multi_modal.model, chat, messages, 'image', image), media_type='text/plain')
 
 @router.websocket('/ws')
+@load_model_catch
 @websocket_catch
 async def create_chat_websocket(websocket: WebSocket):
     await websocket.accept()
@@ -253,7 +268,7 @@ async def create_chat_websocket(websocket: WebSocket):
     while True:
         input_content = tw_to_cn.convert(await websocket.receive_text())
         messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=input_content))
-        messages = await create_socket(websocket, websocket.app.chat.model, messages)
+        messages = await create_socket(websocket, websocket.app.chatbot.model, messages)
         await websocket.send_json(dict(content=messages[-1].content, completion=True))
-        await asleep(1)
+        await asyncio.sleep(1)
         messages = list(remove_tool_calls(messages))

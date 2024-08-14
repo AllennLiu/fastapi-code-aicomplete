@@ -4,6 +4,7 @@ LOOP_KEEP=True
 WORKDIR=$PWD
 SERVE_PORT=7860
 SERVE_HOST=0.0.0.0
+SERVE_HTTPS=false
 
 # SSH client public key
 SSH_PUB_KEY='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCxrbvTeCCQvOvMQqh98MPuJxpNlAwYQUueGrY1Z3byoNuR1bThjSAq9DGG6ANuRzrHDtxPXRxURQensNJdmKN0s37tpyvbvYV5Zjg0xUWgTpP+7QCzPGzXdsONZ6CR7cUL3phClMVnUFhERZ56gU+CqBHpFJskT9Qf2nxlTPf+1UFwlDag21Vi756u81wXyMUYs2GNQjVSnCF/5U92CSsNqENifxfEDdCyCmqTm9FntCH/wT8eHL0earjGPM4Jr83QtXjncxIwoqpSkrOAPq7s/0fSKrnYbb+RfMKKyIt5dxCM0HCNgfoDaVYuwp0fu5ujuR3Prdy3ert9UTMWp9/e2iMJsskb3O3nP3I45fO8vOWF9vX0ZM+Ok/pWIPJlBY52jyKaTqU/QiqXGqoqs0XKhQnyfPn3gQQL/Py/0Kzsf4FP2zkoQhKRBRXpISU/4y5g/bpary5LBCZqmG7GlB/+98B337FJMR3nZHZXm1aBns+ElqDZiM4ix5jC7WipchSUW5RWV3RRhkqX9KrS0WdrhFGovzm22QseUwNJul7ZnSsYf6WiScGEAh5rZywfr0ZriAww65g9Vv/s47Wx4lbX3mlyjwFMSIUZkf4L3Prs2rQSelDTVs4zRxKWa9ZKOmNDe8YmrvK+LIQ/NX6CQB0wEmLHUBBstewdNBccXRy9Rw== ieciec070168@IPT-070168-HP'
@@ -28,6 +29,7 @@ Options:
     --chat               enable chat model
     --code               enable code model
     --multi-modal        enable multi modal model
+    --ssl-active         enable HTTPs protocol with SSL CA files (server.crt, server.key)
 
 EOF
     exit 0
@@ -61,9 +63,14 @@ function server_forever
 function main
 {
     config_sshd
+    if [ "${SERVE_HTTPS,,}" == "true" ]; then
+        [ ! -f "server.crt" -o ! -f "server.key" ] && \
+            echo "SSL CA files server.crt or server.key not found." && exit 1
+        local ssl_para_line="--certfile=server.crt --keyfile=server.key"
+    fi
     [ -z "$MODE_CHATBOT" -a -z "$MODE_CODE" -a -z "$MODE_MULTIMODAL" ] && \
         echo "Please specify an option for enabling at least one of model." && exit 1
-    gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT -t 300 \
+    gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT -t 300 $ssl_para_line \
         --worker-connections 1 --reload -w $WORKER_NUM -k uvicorn.workers.UvicornWorker
     exit 0
 }
@@ -99,6 +106,9 @@ do
             ;;
         --multi-modal)
             export MODE_MULTIMODAL=true
+            ;;
+        --ssl-active)
+            export SERVE_HTTPS=true
             ;;
         * ) echo "Invalid arguments, try '-h/--help' for more information."
             exit 1

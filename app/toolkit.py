@@ -1,18 +1,12 @@
-import re, json, textwrap, traceback, requests, inspect, paramiko
-import numpy as np
-from PIL import Image
-from io import BytesIO
-from operator import itemgetter
-from chatglm_cpp import ChatMessage
-from pydantic import BaseModel
+import os, json, requests, inspect, paramiko
 from types import GenericAlias
-from typing import Any, Dict, List, Annotated, Callable, Coroutine, Generator, get_origin
+from pydantic import BaseModel
+from typing import Dict, List, Annotated, Generator, get_origin
 
-try:
-    from chatglm_cpp import Image as CImage
-except:
-    import chatglm_cpp
-    print(f'WARNING: module chatglm_cpp {chatglm_cpp.__version__} is not support the Image object yet.')
+from .config import get_settings
+from .utils import RedisContextManager
+
+settings = get_settings()
 
 class ToolBaseParam(BaseModel):
     name        : str
@@ -24,6 +18,10 @@ class ToolParameter(ToolBaseParam):
 
 class ToolFunction(ToolBaseParam):
     params: List[Dict[str, str | bool]]
+
+class ToolDownload(BaseModel):
+    filename: str
+    link: str
 
 class Tools:
     """
@@ -41,9 +39,9 @@ class Tools:
         prompt: Annotated[str, 'prompt for describe the code', True]
     ) -> str:
         """
-        代码小帮手，语言: xxx，提示: xxx
+        代码生成，语言: xxx，提示: 写一个 xxxxxxxx 的功能
         """
-        url = 'http://ares-copilot.sit.ipt.inventec:7860/copilot/coding'
+        url = 'https://ares-copilot.sit.ipt.inventec:7860/copilot/coding'
         headers = { "Content-Type": "application/json" }
         payload = json.dumps(dict(
             max_length  = 1024,
@@ -58,15 +56,13 @@ class Tools:
         response = requests.post(url, headers=headers, data=payload, verify=False)
         response.raise_for_status()
         print(data := response.json())
-        return json.dumps(dict(
-            message = f'耗时：{round(data["elapsed_time"])}秒，请点击连结下载脚本',
-            url     = data.get('url')
-        ), ensure_ascii=False)
+        message = f'耗时：{round(data["elapsed_time"])}秒，请点击连结下载脚本'
+        return json.dumps(dict(message=message, url=data.get('url')), ensure_ascii=False)
 
     @staticmethod
     def get_weather(city_name: Annotated[str, 'The name of the city to be queried', True]) -> str:
         """
-        根据城市名称获取当前天气
+        帮我查城市的天气
         """
         attrs = [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ]
         keys = { "current_condition": attrs }
@@ -78,13 +74,14 @@ class Tools:
 
     @staticmethod
     def get_shell(
-        host: Annotated[str, 'Access host IP address', True],
+        host: Annotated[str, 'SSH IP address', True],
         password: Annotated[str, 'SSH password', True],
         query: Annotated[str, 'Run command', True]
     ) -> str:
         """
-        连线到 IP 地址，密碼是: xxx，执行命令 xxx
+        连线到 IP 地址，密碼: ******，执行命令 xxx
         """
+        assert host.strip().lower() not in ('localhost', '127.0.0.1'), 'Invalid hostname'
         client = paramiko.SSHClient()
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -93,7 +90,61 @@ class Tools:
         transport.set_keepalive(int(timeout))
         _, stdout, stderr = client.exec_command(query)
         print(output := ''.join(stderr.readlines() + stdout.readlines()))
-        return output
+        data = dict(output=output, status_code=stdout.channel.recv_exit_status())
+        return json.dumps(data, ensure_ascii=False)
+
+    @staticmethod
+    def get_file_available() -> str:
+        """
+        有哪些工具可以下载
+        """
+        url = 'http://ares-ai.sit.ipt.inventec:7860/file/tool/list'
+        return json.dumps(dict(message='点击连结查看可下载的工具清单', url=url), ensure_ascii=False)
+
+    @staticmethod
+    def get_file_download(
+        filename: Annotated[str, 'Download filename', True],
+        path: Annotated[str, 'File saved path', True],
+        host: Annotated[str, 'SSH IP address', True],
+        password: Annotated[str, 'SSH password', True]
+    ) -> str:
+        """
+        下载工具 xxx 到路径: /tmp 下，服务器 IP: xxx，密码: ******
+        """
+        def search(items: List[dict], filename: str) -> Generator[str, None, None]:
+            for file in items:
+                if isinstance(file.get('children', ''), list):
+                    yield from search(file["children"], filename)
+                else:
+                    if filename.lower() in file.get('title', '').lower():
+                        yield file.get('path')
+        validate_path = json.loads(Tools.get_shell(host, password, f'ls {path}'))
+        if validate_path.get('status_code', -1) != 0:
+            return validate_path.get('output', '无法连线或发生例外错误')
+        files: List[ToolDownload] = []
+        responses: List[Dict[str, str]] = []
+        api_url = 'https://ares-g2-fastapi.sit.ipt.inventec/api/v1'
+        with RedisContextManager(settings.db.redis) as r:
+            collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
+            for script in r.hkeys('gitlab-script-list'):
+                if filename.lower() in script.lower():
+                    script_data: dict = eval(r.hget('gitlab-script-list', script) or '{}')
+                    files.append(ToolDownload(
+                        filename=f'{script}-{script_data.get("rev", "master")}.zip',
+                        link=os.path.join(api_url, 'scripts/download', script, 'master')))
+        for tool in search(collections.get('children', []), filename):
+            files.append(ToolDownload(
+                filename=os.path.basename(tool),
+                link=os.path.join(api_url, 'collection/download', tool[1:])))
+        for file in files:
+            dest = os.path.join(path, file.filename)
+            cmd = f'wget --no-check-certificate {file.link} -O {dest}'
+            resp = json.loads(Tools.get_shell(host, password, cmd))
+            result = '成功' if resp["status_code"] == 0 else '失败'
+            responses.append(f'下载工具 {file.filename} {result}')
+        if not responses:
+            responses = dict(message='找不到该工具，或是您可以问我：【有哪些工具可以下载】')
+        return json.dumps(responses, ensure_ascii=False)
 
 def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str | bool]]]]:
     """
@@ -120,137 +171,3 @@ def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str |
                 name=name, description=desc, type=_type, required=required)))
         docs.append(dict(ToolFunction(name=tool_name, description=tool_desc, params=tool_params)))
     return docs
-
-OBSERVATION_MAX_LENGTH = 1024
-REGISTERED_TOOLS = register_tool(Tools)
-TOOL_CALLS_KEYWORD = 'call tool:'
-
-def build_tool_system_prompt(content: str) -> ChatMessage:
-    """
-    Appending all available :class:`~Tools` to system prompt
-    message, this method is fitting with the ``GLM-4`` model.
-    """
-    content += '\n\n# 可用工具'
-    for tool in REGISTERED_TOOLS:
-        content += f'\n\n## {tool["name"]}\n\n{json.dumps(tool, ensure_ascii=False, indent=4)}'
-    return ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=content)
-
-SYSTEM_PROMPT = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=textwrap.dedent("""\
-你是人工智能 AI 助手，你叫 Black.Milan，你是由 SIT TA 团队创造的。
-你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。\
-"""))
-SYSTEM_TOOL_PROMPT = build_tool_system_prompt(SYSTEM_PROMPT.content)
-
-def func_called(message: ChatMessage) -> bool:
-    """
-    Determine whether the first line of message content which name is
-    included in `REGISTERED_TOOLS` _(this available :class:`~Tools`)_.
-    """
-    return message.content.splitlines()[0] in map(itemgetter('name'), REGISTERED_TOOLS)
-
-def run_func(name: str, arguments: str) -> str:
-    """
-    Run `observation` mode with assistant which function name or
-    arguments were been passed.
-    Finally, it returns the response of **stringify** :class:`~dict`
-    to next round conversation.
-    """
-    print(f'Calling tool {name}, args: {arguments}')
-    def tool_call(**kwargs: Any) -> Dict[str, Any]:
-        return kwargs
-    func: Callable[..., Any] = getattr(Tools, name)
-    try:
-        kwargs = eval(arguments, dict(tool_call=tool_call))
-    except Exception:
-        return f'Invalid arguments {arguments}'
-    try:
-        return str(func(**kwargs))
-    except Exception:
-        return traceback.format_exc()
-
-async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
-    """
-    While the tool function is included in chat messages, it parsing
-    the contents to separate it into the function name and arguments,
-    then call the :func:`~run_func` to invoke specified function.
-    """
-    tool_call_contents = messages[-1].content.splitlines()
-    func_name, func_arg = tool_call_contents[0], '\n'.join(tool_call_contents[1:])
-    observation = run_func(func_name, func_arg)
-    messages.append(ChatMessage(role=ChatMessage.ROLE_OBSERVATION, content=observation))
-    return messages
-
-def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, None, None]:
-    """
-    Removing wether the :class:`~ChatMessage` which role is `observation`
-    or `tool calls by assistant` then pop out of the list.
-    """
-    for message in messages:
-        if message.role == ChatMessage.ROLE_OBSERVATION:
-            continue
-        elif message.role == ChatMessage.ROLE_ASSISTANT and func_called(message):
-            continue
-        elif message.role == ChatMessage.ROLE_USER and TOOL_CALLS_KEYWORD in message.content:
-            message.content = re.sub(f'^{TOOL_CALLS_KEYWORD}', '', message.content, re.I)
-        yield message
-
-def compress_message(messages: List[ChatMessage] = [], max_length: int = 2048) -> List[ChatMessage]:
-    """
-    When tool function has been called, the messages is going to
-    compress into **system prompt** + **the last message which is
-    function calls**.
-
-    Compress the each message recursively if the content length
-    is large over than `max_length` then shift out the first two
-    items _(user + assistant)_ from messages, at the mean time,
-    these message being iterated to remove following contents:
-    - Markdown code block including the context
-    - Function calls name and passed arguments
-    - After the two previous operations, clear the unused newline
-
-    If a message content length is large over than ``512`` bytes,
-    truncate it to ``128`` bytes before the content, it just for
-    collecting the characteristic of message content.
-    """
-    if (re.search(TOOL_CALLS_KEYWORD, messages[-1].content, re.I)
-        or messages[-1].role == ChatMessage.ROLE_OBSERVATION):
-        return [ SYSTEM_TOOL_PROMPT, messages[-1] ]
-    content = ''
-    for message in messages:
-        if message.role != ChatMessage.ROLE_SYSTEM:
-            regex_code_block = r'^```[^\S\r\n]*[a-z]*(?:\n(?!```$).*)*\n```'
-            regex_func_calls = 'get_[\w_]+\n+\{\S.*\}\n+'
-            regex_unused_newline = r'(\n){2,}'
-            message.content = re.sub(regex_code_block, '', message.content, 0, re.MULTILINE)
-            message.content = re.sub(regex_func_calls, '', message.content)
-            message.content = re.sub(regex_unused_newline,'\n', message.content, 0, re.MULTILINE)
-            if len(message.content) > 512:
-                message.content = message.content[:128]
-        content += message.content
-    if len(content) > max_length and len(messages) > 1:
-        return compress_message([ messages[0], *messages[3:] ], max_length)
-    return messages
-
-def convert_message(
-    messages: List[ChatMessage | Dict[str, str]], to_object: ChatMessage | dict
-) -> List[ChatMessage | Dict[str, str]]:
-    """
-    Converting each data between type is :class:`~ChatMessage` or
-    type is :class:`~dict` in messages.
-    """
-    return (
-        [ ChatMessage(**m) for m in messages ] if isinstance(to_object, type(ChatMessage))
-        else [ dict(role=m.role, content=m.content) for m in messages ]
-    )
-
-def insert_image(message: ChatMessage, file_bytes: bytes) -> ChatMessage:
-    """
-    Converting the **image** :class:`~bytes` data to :class:`~CImage`\
-    object with ``RGB`` mode, and this object argument require type\
-    is the :class:`~np.ndarray` to be :class:`~chatglm_cpp.Image`\
-    _(:class:`~CImage`)_ buffer.
-
-    _(Using :class:`~chatglm_cpp.Image` require module ``chatglm_cpp>=0.4.1``)_
-    """
-    image = CImage(np.asarray(Image.open(BytesIO(file_bytes)).convert('RGB')))
-    return ChatMessage(role=message.role, content=message.content, image=image)
