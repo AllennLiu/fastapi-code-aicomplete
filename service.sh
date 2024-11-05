@@ -38,7 +38,7 @@ EOF
 function config_sshd
 {
     # release limitation of log watch
-    [ -z "$(grep -F fs.inotify.max_user_watches=524288 /etc/sysctl.conf)" ] && \
+    test -z "$(grep -F fs.inotify.max_user_watches=524288 /etc/sysctl.conf)" && \
         echo fs.inotify.max_user_watches=524288 | tee -a /etc/sysctl.conf && sysctl -p
 
     # configure SSH settings
@@ -64,13 +64,14 @@ function main
 {
     config_sshd
     if [ "${SERVE_HTTPS,,}" == "true" ]; then
-        [ ! -f "server.crt" -o ! -f "server.key" ] && \
+        test ! -f "server.crt" -o ! -f "server.key" && \
             echo "SSL CA files server.crt or server.key not found." && exit 1
         local ssl_para_line="--certfile=server.crt --keyfile=server.key"
     fi
-    [ -z "$MODE_CHATBOT" -a -z "$MODE_CODE" -a -z "$MODE_MULTIMODAL" ] && \
+    test -z "$MODE_CHATBOT" -a -z "$MODE_CODE" -a -z "$MODE_MULTIMODAL" && \
         echo "Please specify an option for enabling at least one of model." && exit 1
-    gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT -t 300 $ssl_para_line \
+    gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT \
+        -t 600 --graceful-timeout 600 --keep-alive 600 $ssl_para_line \
         --worker-connections 1 --reload -w $WORKER_NUM -k uvicorn.workers.UvicornWorker
     exit 0
 }

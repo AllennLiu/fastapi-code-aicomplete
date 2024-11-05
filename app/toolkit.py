@@ -41,7 +41,7 @@ class Tools:
         """
         代码生成，语言: xxx，提示: 写一个 xxxxxxxx 的功能
         """
-        url = 'https://ares-copilot.sit.ipt.inventec:7860/copilot/coding'
+        url = 'https://ares-copilot-sit.inventec.com.cn/copilot/coding'
         headers = { "Content-Type": "application/json" }
         payload = json.dumps(dict(
             max_length  = 1024,
@@ -65,7 +65,7 @@ class Tools:
         帮我查城市的天气
         """
         attrs = [ 'temp_C', 'FeelsLikeC', 'humidity', 'weatherDesc', 'observation_time' ]
-        keys = { "current_condition": attrs }
+        keys = dict(current_condition=attrs)
         resp = requests.get(f'https://wttr.in/{city_name}?format=j1', timeout=60)
         resp_json: dict = resp.json()
         data = { k: { _v: resp_json[k][0][_v] for _v in keys[k] } for k in keys }
@@ -98,7 +98,7 @@ class Tools:
         """
         有哪些工具可以下载
         """
-        url = 'http://ares-ai.sit.ipt.inventec:7860/file/tool/list'
+        url = 'https://ares-ai-sit.inventec.com.cn/file/tool/list'
         return json.dumps(dict(message='点击连结查看可下载的工具清单', url=url), ensure_ascii=False)
 
     @staticmethod
@@ -123,7 +123,7 @@ class Tools:
             return validate_path.get('output', '无法连线或发生例外错误')
         files: List[ToolDownload] = []
         responses: List[Dict[str, str]] = []
-        api_url = 'https://ares-g2-fastapi.sit.ipt.inventec/api/v1'
+        api_url = 'https://ares-fastapi-sit.inventec.com.cn/api/v1'
         with RedisContextManager(settings.db.redis) as r:
             collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
             for script in r.hkeys('gitlab-script-list'):

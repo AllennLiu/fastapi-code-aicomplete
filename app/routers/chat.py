@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
 from starlette.responses import JSONResponse, StreamingResponse
 from typing import Dict, List, Annotated, AsyncIterator, Coroutine, Generator, Iterable
-from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, File, Form, Body
+from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, status, File, Form, Body
 
 from ..config import get_settings
 from ..catch import load_model_catch, websocket_catch
@@ -11,7 +11,8 @@ from ..utils import RedisContextManager, block_bad_words, remove_punctuation, re
 from ..chats import observe, func_called, remove_tool_calls, compress_message, convert_message, insert_image, SYSTEM_PROMPT
 
 settings = get_settings()
-router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: { "description": "Not found" }})
+router = APIRouter(prefix='/chat', tags=[ 'Chat' ], responses={ 404: dict(description='Not found') })
+STREAM_WAIT_TIME: float = .05
 FORM_UUID = Form(..., description='User `UUID`')
 FORM_LABEL = Form(..., description='**Stringify** `JSON` label data')
 
@@ -117,14 +118,14 @@ async def create_streaming(
             chunks.append(chunk)
             if pipeline.merge_streaming_messages(chunks).content.strip():
                 yield block_bad_words(chunk.content)
-                await asyncio.sleep(.01)
+                await asyncio.sleep(STREAM_WAIT_TIME)
     messages.append(pipeline.merge_streaming_messages(chunks))
     if func_called(messages[-1]):
         yield '\n\n'
         with contextlib.suppress(asyncio.CancelledError):
             async for chunk in create_streaming(request, chat_info, await observe(messages)):
                 yield chunk
-                await asyncio.sleep(.01)
+                await asyncio.sleep(STREAM_WAIT_TIME)
     save_chat_history(chat_info, remove_tool_calls(messages))
 
 async def file_stream(
@@ -145,7 +146,7 @@ async def file_stream(
             if await request.is_disconnected(): break
             if pipeline.merge_streaming_messages(chunks).content.strip():
                 yield block_bad_words(chunk.content)
-                await asyncio.sleep(.01)
+                await asyncio.sleep(STREAM_WAIT_TIME)
     messages.append(pipeline.merge_streaming_messages(chunks))
     messages[-2].content = f'{tag}=[{file.filename}] {messages[-2].content}'
     save_chat_history(chat, messages)
@@ -166,7 +167,7 @@ async def create_socket(
             if (content := pipeline.merge_streaming_messages(chunks).content).strip():
                 await websocket.send_json(dict(
                     content=block_bad_words(content).lstrip(), completion=False))
-                await asyncio.sleep(.01)
+                await asyncio.sleep(STREAM_WAIT_TIME)
     messages.append(pipeline.merge_streaming_messages(chunks))
     if func_called(messages[-1]):
         return await create_socket(websocket, await observe(messages))
@@ -188,7 +189,7 @@ async def create_chat_conversation(
     messages = list(remove_tool_calls(messages))
     save_chat_history(chat_info, messages)
     save_chat_record(prompt, content := messages[-1].content)
-    return JSONResponse(status_code=200, content=dict(
+    return JSONResponse(status_code=status.HTTP_200_OK, content=dict(
         response     = markdown.markdown(content) if chat_info.html else content,
         history      = convert_message(messages, dict),
         datetime     = (now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
@@ -205,7 +206,7 @@ async def get_chat_subject(request: Request, chat_info: Annotated[ChatInfo, Body
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query[:128]))
     subjects = await create_conversation(request.app.chatbot.model, chat_info, messages)
     resp = dict(subject=remove_punctuation(subjects[-1].content).capitalize()[:10])
-    return JSONResponse(status_code=200, content=resp)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Chat')
 @load_model_catch
@@ -235,7 +236,8 @@ async def create_chat_file_stream(
     """
     chat = ChatInfo(uuid=uuid, query=await read_file(file, uuid), label=json.loads(label), system=system)
     if not chat.query:
-        raise HTTPException(status_code=422, detail='Invalid File Content')
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid File Content')
     messages = merge_chat_history(chat)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat.query))
     return StreamingResponse(file_stream(

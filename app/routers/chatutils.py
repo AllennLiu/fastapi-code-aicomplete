@@ -3,7 +3,7 @@ from operator import itemgetter
 from pydantic import BaseModel, Field
 from typing import Dict, List, Annotated
 from fastapi.templating import Jinja2Templates
-from fastapi import APIRouter, Request, Body, Path
+from fastapi import APIRouter, Request, status, Body, Path
 from starlette.responses import JSONResponse, HTMLResponse
 
 from ..config import get_settings
@@ -11,7 +11,7 @@ from ..chats import REGISTERED_TOOLS
 from ..utils import RedisContextManager
 
 settings = get_settings()
-router = APIRouter(prefix='/chat/utils', tags=[ 'Chat Utils' ], responses={ 404: { "description": "Not found" }})
+router = APIRouter(prefix='/chat/utils', tags=[ 'Chat Utils' ], responses={ 404: dict(description='Not found') })
 PATH_UUID = Path(description='User `UUID`')
 PATH_DATE = Path(description='Tab created **datetime**')
 
@@ -32,7 +32,7 @@ async def render_chat_demo(request: Request) -> HTMLResponse:
 @router.get('/help')
 async def show_toolkit() -> JSONResponse:
     resp = list(map(itemgetter('description'), REGISTERED_TOOLS))
-    return JSONResponse(status_code=200, content=resp)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.get('/tabs/{uuid}')
 async def get_chat_tabs(uuid: Annotated[str, Path(description='User `UUID`')]) -> JSONResponse:
@@ -40,7 +40,7 @@ async def get_chat_tabs(uuid: Annotated[str, Path(description='User `UUID`')]) -
         name = f'talk-history-hash-{uuid}'
         tabs = [ dict(ChatTab(**json.loads(r.hget(name, k) or '{}'))) for k in r.hkeys(name) ]
     resp = sorted(tabs, key=itemgetter('datetime'), reverse=True)
-    return JSONResponse(status_code=200, content=resp)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.put('/tab/rename')
 async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body()]) -> JSONResponse:
@@ -49,7 +49,7 @@ async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body()]) -> JSONRespon
         data = json.loads(r.hget(*args) or '{}') | dict(label=chat_tab.name)
         r.hset(*args, json.dumps(data, ensure_ascii=False))
         resp = dict(ChatTab(**json.loads(r.hget(*args))))
-    return JSONResponse(status_code=200, content=resp)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.get('/history/{uuid}/{datetime}')
 async def get_chat_history_by_datetime(
@@ -57,7 +57,7 @@ async def get_chat_history_by_datetime(
 ) -> JSONResponse:
     with RedisContextManager(settings.db.redis) as r:
         data = json.loads(r.hget(f'talk-history-hash-{uuid}', datetime) or '{}')
-    return JSONResponse(status_code=200, content=data.get('history', []))
+    return JSONResponse(status_code=status.HTTP_200_OK, content=data.get('history', []))
 
 @router.delete('/history/{uuid}/{datetime}')
 async def delete_chat_history_by_datetime(
@@ -67,7 +67,7 @@ async def delete_chat_history_by_datetime(
         args = ( f'talk-history-hash-{uuid}', datetime )
         r.hdel(*args)
         resp = dict(ok=r.hget(*args) is None)
-    return JSONResponse(status_code=200, content=resp)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.delete('/forget/{uuid}/{range}')
 async def clean_chat_history(
@@ -84,4 +84,4 @@ async def clean_chat_history(
     with RedisContextManager(settings.db.redis) as r:
         history: List[Dict[str, str]] = json.loads(r.get(f'talk-history-{uuid}') or '[]')
         r.set(f'talk-history-{uuid}', json.dumps(history[: range * 2], ensure_ascii=False))
-    return JSONResponse(status_code=200, content=dict(ok=True))
+    return JSONResponse(status_code=status.HTTP_200_OK, content=dict(ok=True))

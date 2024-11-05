@@ -1,6 +1,6 @@
 import json
-from fastapi import APIRouter, HTTPException, Path
 from typing import Dict, List, Annotated, Generator
+from fastapi import APIRouter, HTTPException, status, Path
 from starlette.responses import PlainTextResponse, StreamingResponse
 
 from ..config import get_settings
@@ -16,7 +16,8 @@ def get_model_generated_script(uuid: Annotated[str, PATH_UUID]) -> StreamingResp
         query: Dict[str, str] = json.loads(r.hget('model-generated-scripts', uuid) or '{}')
         uuids = ', '.join(r.hkeys('model-generated-scripts'))
     if not query:
-        raise HTTPException(status_code=404, detail=f'UUID Not Found, Available: [{uuids}]')
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f'UUID Not Found, Available: [{uuids}]')
     with RedisContextManager(settings.db.redis) as r:
         query |= dict(download_count=query.get('download_count', 0) + 1)
         r.hset('model-generated-scripts', uuid, json.dumps(query, ensure_ascii=False))

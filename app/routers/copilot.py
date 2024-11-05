@@ -4,7 +4,7 @@ from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
 from typing import Annotated, Generator
 from fastapi.templating import Jinja2Templates
-from fastapi import APIRouter, Request, WebSocket, HTTPException, Body
+from fastapi import APIRouter, Request, WebSocket, HTTPException, status, Body
 from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
 
 from ..config import get_settings
@@ -12,7 +12,8 @@ from ..catch import load_model_catch, websocket_catch
 from ..utils import RedisContextManager, copilot_prompt
 
 settings = get_settings()
-router = APIRouter(prefix='/copilot', tags=[ 'Copilot' ], responses={ 404: { "description": "Not found" } })
+router = APIRouter(prefix='/copilot', tags=[ 'Copilot' ], responses={ 404: dict(description='Not found') })
+STREAM_WAIT_TIME: float = .05
 
 class CodingParam(BaseModel):
     max_length: int = Field(1024, le=2048, description='Response length maximum is `2k`')
@@ -57,13 +58,14 @@ async def create_coding_task(
     pipeline: Pipeline = request.app.copilot.model
     if not settings.lang_tags.get(task.lang):
         lang_tag = ', '.join(settings.lang_tags)
-        raise HTTPException(status_code=404, detail=f'Invalid Language, Available: [{lang_tag}]')
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f'Invalid Language, Available: [{lang_tag}]')
     prompt, _ = copilot_prompt(settings.lang_tags, task.lang, task.prompt)
     response = pipeline.generate(
         prompt, do_sample=task.temperature > 0, **dict(CodingParam(**dict(task))))
     if task.html:
-        return HTMLResponse(status_code=200, content=response)
-    return JSONResponse(status_code=200, content=dict(
+        return HTMLResponse(status_code=status.HTTP_200_OK, content=response)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=dict(
         response=response,
         lang=task.lang,
         datetime=(now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
@@ -104,7 +106,7 @@ async def create_coding_socket(
         for content in streaming:
             code += content
             await websocket.send_text(code)
-            await asleep(.01)
+            await asleep(STREAM_WAIT_TIME)
         await asleep(1)
         await websocket.close()
         break
@@ -119,4 +121,4 @@ async def get_languages() -> JSONResponse:
     """
     Listing currently **SUPPORT LANGUAGE** for AI programming.
     """
-    return JSONResponse(status_code=200, content=settings.lang_tags)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=settings.lang_tags)
