@@ -1,0 +1,8 @@
+{
+    "exclude": ["static", "templates"],
+    "typeCheckingMode": "basic",
+    "reportMissingImports": false,
+    "reportMissingModuleSource": false,
+    "reportUnusedVariable": false,
+    "reportAttributeAccessIssue": false
+}

@@ -1,25 +1,25 @@
 import json
-from typing import Dict, List, Annotated, Generator
 from fastapi import APIRouter, HTTPException, status, Path
+from typing import Dict, List, Annotated, Final, Generator
 from starlette.responses import PlainTextResponse, StreamingResponse
 
 from ..config import get_settings
 from ..utils import RedisContextManager
 
 settings = get_settings()
-router = APIRouter(prefix='/file', tags=[ 'File' ], responses={ 404: { "description": "Not found" } })
-PATH_UUID = Path(description='Generated script `UUID` number')
+router = APIRouter(prefix='/file', tags=[ 'File' ], responses={ 404: dict(description='Not found') })
+PATH_UUID: Final = Path(..., description='Generated script `UUID` number')
 
 @router.get('/download/script/{uuid}', response_class=StreamingResponse)
 def get_model_generated_script(uuid: Annotated[str, PATH_UUID]) -> StreamingResponse:
     with RedisContextManager(settings.db.redis) as r:
-        query: Dict[str, str] = json.loads(r.hget('model-generated-scripts', uuid) or '{}')
+        query: Dict[str, str | int] = json.loads(r.hget('model-generated-scripts', uuid) or '{}')
         uuids = ', '.join(r.hkeys('model-generated-scripts'))
     if not query:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f'UUID Not Found, Available: [{uuids}]')
     with RedisContextManager(settings.db.redis) as r:
-        query |= dict(download_count=query.get('download_count', 0) + 1)
+        query |= dict(download_count=int(query.get('download_count', 0)) + 1)
         r.hset('model-generated-scripts', uuid, json.dumps(query, ensure_ascii=False))
     filename = query.get('filename', '')
     resp = StreamingResponse(query.get('code', ''), media_type='text/plain')
@@ -33,8 +33,10 @@ def get_tool_list() -> PlainTextResponse:
             if isinstance(file.get('children', ''), list):
                 yield from flatten(file["children"])
             else:
-                if file.get('title'): yield file.get('title')
+                if file.get('title'):
+                    yield file["title"]
     with RedisContextManager(settings.db.redis) as r:
         scripts: List[str] = r.hkeys('gitlab-script-list')
         collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
-    return '\n'.join(scripts + list(flatten(collections.get('children', []))))
+    tools_text = '\n'.join(scripts + list(flatten(collections.get('children', []))))
+    return PlainTextResponse(tools_text, status_code=status.HTTP_200_OK)

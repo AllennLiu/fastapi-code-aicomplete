@@ -17,11 +17,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[Any]:
         if not model_dict[model].get('enabled'): continue
         setattr(app, model, ML(*load_llm(**model_dict[model], device=settings.load_dev)))
     yield
-    for model in model_dict: model_dict[model].get('enabled') and delattr(app, model)
+    for model in model_dict:
+        if model_dict[model].get('enabled'):
+            delattr(app, model)
 
 app = FastAPI(title=settings.app_name, description=settings.desc, lifespan=lifespan)
 app.mount('/static', StaticFiles(directory='app/static'), name='static')
 cors_allows = dict(allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
 app.add_middleware(CORSMiddleware, **cors_allows)
-settings.ssl_active and app.add_middleware(HTTPSRedirectMiddleware)
+if settings.ssl_active:
+    app.add_middleware(HTTPSRedirectMiddleware)
 for r in chat, chatutils, copilot, file: app.include_router(r.router)

@@ -1,7 +1,7 @@
 import json, textwrap
 from operator import itemgetter
 from pydantic import BaseModel, Field
-from typing import Dict, List, Annotated
+from typing import Dict, List, Annotated, Final
 from fastapi.templating import Jinja2Templates
 from fastapi import APIRouter, Request, status, Body, Path
 from starlette.responses import JSONResponse, HTMLResponse
@@ -12,8 +12,8 @@ from ..utils import RedisContextManager
 
 settings = get_settings()
 router = APIRouter(prefix='/chat/utils', tags=[ 'Chat Utils' ], responses={ 404: dict(description='Not found') })
-PATH_UUID = Path(description='User `UUID`')
-PATH_DATE = Path(description='Tab created **datetime**')
+PATH_UUID: Final = Path(..., description='User `UUID`')
+PATH_DATE: Final = Path(..., description='Tab created **datetime**')
 
 class ChatTab(BaseModel):
     label    : str = ''
@@ -25,7 +25,7 @@ class ChatRename(BaseModel):
     datetime: str = Field(..., description='Tab created **datetime**')
 
 @router.get('/demo', response_class=HTMLResponse, include_in_schema=False)
-async def render_chat_demo(request: Request) -> HTMLResponse:
+async def render_chat_demo(request: Request):
     template = Jinja2Templates(directory='./app/templates')
     return template.TemplateResponse('chat.html', context=dict(request=request))
 
@@ -35,7 +35,7 @@ async def show_toolkit() -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.get('/tabs/{uuid}')
-async def get_chat_tabs(uuid: Annotated[str, Path(description='User `UUID`')]) -> JSONResponse:
+async def get_chat_tabs(uuid: Annotated[str, Path(..., description='User `UUID`')]) -> JSONResponse:
     with RedisContextManager(settings.db.redis) as r:
         name = f'talk-history-hash-{uuid}'
         tabs = [ dict(ChatTab(**json.loads(r.hget(name, k) or '{}'))) for k in r.hkeys(name) ]
@@ -43,12 +43,12 @@ async def get_chat_tabs(uuid: Annotated[str, Path(description='User `UUID`')]) -
     return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.put('/tab/rename')
-async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body()]) -> JSONResponse:
+async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body(...)]) -> JSONResponse:
     with RedisContextManager(settings.db.redis) as r:
         args = ( f'talk-history-hash-{chat_tab.uuid}', chat_tab.datetime )
         data = json.loads(r.hget(*args) or '{}') | dict(label=chat_tab.name)
         r.hset(*args, json.dumps(data, ensure_ascii=False))
-        resp = dict(ChatTab(**json.loads(r.hget(*args))))
+        resp = dict(ChatTab(**json.loads(r.hget(*args) or '{}')))
     return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
 
 @router.get('/history/{uuid}/{datetime}')
@@ -72,7 +72,7 @@ async def delete_chat_history_by_datetime(
 @router.delete('/forget/{uuid}/{range}')
 async def clean_chat_history(
     uuid : Annotated[str, PATH_UUID],
-    range: Annotated[int, Path(description=textwrap.dedent("""\
+    range: Annotated[int, Path(..., description=textwrap.dedent("""\
     Chat history **forget range**: the range of `pair entry` is **count from the end**\n
     **Pair entry** means the history which is the role both of user and assistant.
     - `0 = let it go` _(all the history)_

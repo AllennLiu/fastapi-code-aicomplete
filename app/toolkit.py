@@ -87,6 +87,8 @@ class Tools:
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(host, 22, 'root', password, timeout=(timeout := 10.))
         transport = client.get_transport()
+        if not transport:
+            return json.dumps(dict(output='Connection failure', status_code=-1), ensure_ascii=False)
         transport.set_keepalive(int(timeout))
         _, stdout, stderr = client.exec_command(query)
         print(output := ''.join(stderr.readlines() + stdout.readlines()))
@@ -117,12 +119,12 @@ class Tools:
                     yield from search(file["children"], filename)
                 else:
                     if filename.lower() in file.get('title', '').lower():
-                        yield file.get('path')
+                        yield file.get('path', '')
         validate_path = json.loads(Tools.get_shell(host, password, f'ls {path}'))
         if validate_path.get('status_code', -1) != 0:
             return validate_path.get('output', '无法连线或发生例外错误')
         files: List[ToolDownload] = []
-        responses: List[Dict[str, str]] = []
+        responses: List[Dict[str, str] | str] = []
         api_url = 'https://ares-fastapi-sit.inventec.com.cn/api/v1'
         with RedisContextManager(settings.db.redis) as r:
             collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
@@ -143,7 +145,8 @@ class Tools:
             result = '成功' if resp["status_code"] == 0 else '失败'
             responses.append(f'下载工具 {file.filename} {result}')
         if not responses:
-            responses = dict(message='找不到该工具，或是您可以问我：【有哪些工具可以下载】')
+            return json.dumps(dict(
+                message='找不到该工具，或是您可以问我：【有哪些工具可以下载】'), ensure_ascii=False)
         return json.dumps(responses, ensure_ascii=False)
 
 def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str | bool]]]]:
@@ -156,7 +159,7 @@ def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str |
     for func in instance.__dict__.values():
         if not isinstance(func, staticmethod): continue
         tool_name = func.__name__
-        tool_desc = inspect.getdoc(func).strip()
+        tool_desc = str(inspect.getdoc(func)).strip()
         python_params = inspect.signature(func).parameters
         tool_params: List[Dict[str, str | bool]] = []
         for name, param in python_params.items():
@@ -166,7 +169,7 @@ def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str |
             if get_origin(annotation) != Annotated:
                 raise TypeError(f'Annotation type for `{name}` must be :class:`~typing.Annotated`')
             _type, (desc, required) = annotation.__origin__, annotation.__metadata__
-            _type: str = str(_type) if isinstance(_type, GenericAlias) else _type.__name__
+            _type = str(_type) if isinstance(_type, GenericAlias) else _type.__name__
             tool_params.append(dict(ToolParameter(
                 name=name, description=desc, type=_type, required=required)))
         docs.append(dict(ToolFunction(name=tool_name, description=tool_desc, params=tool_params)))

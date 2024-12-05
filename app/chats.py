@@ -1,10 +1,10 @@
-import io, re, json, textwrap, traceback
+import io, re, json, operator, textwrap, traceback
 import numpy as np
 import jieba.posseg as pseg
 from PIL import Image
-from operator import itemgetter
 from chatglm_cpp import Pipeline, ChatMessage
-from typing import Any, Dict, List, Callable, Coroutine, Generator
+from typing_extensions import Buffer
+from typing import Any, Dict, List, Callable, Final, Generator, Iterable, cast
 
 try:
     from chatglm_cpp import Image as CImage
@@ -15,9 +15,11 @@ except:
 from .toolkit import Tools, register_tool
 from .utils import remove_punctuation, set_similarity
 
-OBSERVATION_MAX_LENGTH: int = 1024
-REGEX_FUNC_CALL: str = 'get_[\w_]+\n+\{\S.*\}\n+'
-REGISTERED_TOOLS = register_tool(Tools)
+OBSERVATION_MAX_LENGTH: Final[int] = 1024
+PATTERN_CODE_BLOCK: Final = re.compile(r'^```[^\S\r\n]*[a-z]*(?:\n(?!```$).*)*\n```', flags=re.MULTILINE)
+PATTERN_FUNC_CALL: Final = re.compile('get_[\w_]+\n+\{\S.*\}\n+')
+PATTERN_UNUSED_NEWLINE: Final = re.compile(r'(\n){2,}', flags=re.MULTILINE)
+REGISTERED_TOOLS: Final = register_tool(Tools)
 
 def build_tool_system_prompt(content: str, tools: List[dict] = REGISTERED_TOOLS) -> ChatMessage:
     """
@@ -30,17 +32,20 @@ def build_tool_system_prompt(content: str, tools: List[dict] = REGISTERED_TOOLS)
         content += '\n在调用上述函数时，请使用 Json 格式表示调用的参数。'
     return ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=content)
 
-SYSTEM_PROMPT = ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=textwrap.dedent("""\
-你是人工智能 AI 助手，你叫 Black.Milan，你是由 SIT TA 团队创造的。
-你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。\
-"""))
+SYSTEM_PROMPT: Final[ChatMessage] = ChatMessage(
+    role=ChatMessage.ROLE_SYSTEM,
+    content=textwrap.dedent("""\
+    你是人工智能 AI 助手，你叫 Black.Milan，你是由 SIT TA 团队创造的。
+    你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。\
+    """)
+)
 
 def func_called(message: ChatMessage) -> bool:
     """
     Determine whether the first line of message content which name is
     included in `REGISTERED_TOOLS` _(this available :class:`~Tools`)_.
     """
-    return message.content.splitlines()[0] in map(itemgetter('name'), REGISTERED_TOOLS)
+    return message.content.splitlines()[0] in map(operator.itemgetter('name'), REGISTERED_TOOLS)
 
 def run_func(name: str, arguments: str) -> str:
     """
@@ -62,7 +67,7 @@ def run_func(name: str, arguments: str) -> str:
     except Exception as _:
         return traceback.format_exc()
 
-async def observe(messages: List[ChatMessage]) -> Coroutine[None, None, List[ChatMessage]]:
+async def observe(messages: List[ChatMessage]) -> List[ChatMessage]:
     """
     While the tool function is included in chat messages, it parsing
     the contents to separate it into the function name and arguments,
@@ -97,10 +102,11 @@ def ai_sentences_similarity(pipeline: Pipeline, *sentences: str) -> str:
     system_prompt = '你需要比对用户输入两句话的语境是否相似，最后只能回答yes或no'
     sentence_concat = '"；"'.join(sentences)
     message = f'这两句话 "{sentence_concat}" 是否为相似语境和语意，只能回答yes或no'
-    return pipeline.chat([
+    response = pipeline.chat([
         ChatMessage(role=ChatMessage.ROLE_SYSTEM, content=system_prompt),
         ChatMessage(role=ChatMessage.ROLE_USER, content=message)
-    ], top_p=.1, temperature=.1).content.strip().lower() or 'no'
+    ], top_p=.1, temperature=.1)
+    return cast(ChatMessage, response).content.strip().lower() or 'no'
 
 def select_tool_call(
     message: ChatMessage, pipeline: Pipeline
@@ -119,15 +125,17 @@ def select_tool_call(
     similarities, results = [], []
     for tool in REGISTERED_TOOLS:
         msg_generator = pseg.cut(remove_punctuation(message.content))
-        desc_generator = pseg.cut(remove_punctuation(tool["description"]))
+        desc_generator = pseg.cut(remove_punctuation(str(tool["description"])))
         _, percent = set_similarity((e.word for e in msg_generator), (e.word for e in desc_generator))
-        percent >= 10 and similarities.append((tool, percent))
+        if percent >= 10:
+            similarities.append((tool, percent))
     if not similarities: return
     for tool, percent in similarities:
         result = ai_sentences_similarity(pipeline, tool["description"], message.content)
         print(f'Func: {tool["name"]: <25} Similarity: {f"{percent}%": <8} AI: {result: >3}')
-        result == 'yes' and results.append((tool, percent))
-    return max(results, key=itemgetter(1))[0] if results else None
+        if result == 'yes':
+            results.append((tool, percent))
+    return max(results, key=operator.itemgetter(1))[0] if results else None
 
 def compress_message(
     messages: List[ChatMessage], pipeline: Pipeline, max_length: int = 2048, called: bool = False
@@ -156,11 +164,9 @@ def compress_message(
     content = ''
     for message in messages:
         if message.role != ChatMessage.ROLE_SYSTEM:
-            regex_code_block = r'^```[^\S\r\n]*[a-z]*(?:\n(?!```$).*)*\n```'
-            regex_unused_newline = r'(\n){2,}'
-            message.content = re.sub(regex_code_block, '', message.content, 0, re.MULTILINE)
-            message.content = re.sub(REGEX_FUNC_CALL, '', message.content)
-            message.content = re.sub(regex_unused_newline,'\n', message.content, 0, re.MULTILINE)
+            message.content = PATTERN_CODE_BLOCK.sub('', message.content, 0)
+            message.content = PATTERN_FUNC_CALL.sub('', message.content)
+            message.content = PATTERN_UNUSED_NEWLINE.sub('\n', message.content, 0)
             if len(message.content) > 512:
                 message.content = message.content[:128]
         content += message.content
@@ -168,26 +174,25 @@ def compress_message(
         return compress_message([ messages[0], *messages[3:] ], pipeline, max_length, True)
     return messages
 
-def convert_message(
-    messages: List[ChatMessage | Dict[str, str]], to_object: ChatMessage | dict
-) -> List[ChatMessage | Dict[str, str]]:
+def to_chat_messages(messages: Iterable[Dict[str, Any]]) -> List[ChatMessage]:
+    """Converting each data between type is :class:`~dict` in messages.
     """
-    Converting each data between type is :class:`~ChatMessage` or
-    type is :class:`~dict` in messages.
+    return [ ChatMessage(**m) for m in messages ]
+
+def to_dict_messages(messages: Iterable[ChatMessage]) -> List[Dict[str, str]]:
+    """Converting each data between type is :class:`~ChatMessage`.
     """
-    return (
-        [ ChatMessage(**m) for m in messages ] if isinstance(to_object, type(ChatMessage))
-        else [ dict(role=m.role, content=m.content) for m in messages ]
-    )
+    return [ dict(role=m.role, content=m.content) for m in messages ]
 
 def insert_image(message: ChatMessage, file_bytes: bytes) -> ChatMessage:
     """
-    Converting the **image** :class:`~bytes` data to :class:`~CImage`\
-    object with ``RGB`` mode, and this object argument require type\
-    is the :class:`~np.ndarray` to be :class:`~chatglm_cpp.Image`\
+    Converting the **image** :class:`~bytes` data to :class:`~CImage`
+    object with ``RGB`` mode, and this object argument require type
+    is the :class:`~np.ndarray` to be :class:`~chatglm_cpp.Image`
     _(:class:`~CImage`)_ buffer.
 
     _(Using :class:`~chatglm_cpp.Image` require module ``chatglm_cpp>=0.4.1``)_
     """
-    image = CImage(np.asarray(Image.open(io.BytesIO(file_bytes)).convert('RGB')))
+    img_obj = Image.open(io.BytesIO(file_bytes)).convert('RGB')
+    image = CImage(cast(Buffer, np.asarray(img_obj)))
     return ChatMessage(role=message.role, content=message.content, image=image)

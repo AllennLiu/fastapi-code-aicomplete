@@ -1,10 +1,10 @@
 import os, textwrap
-from typing import Dict
 from functools import lru_cache
 from starlette.config import Config
+from typing import Dict, Final, cast
 from pydantic_settings import BaseSettings
 
-LANGUAGE_TAG: Dict[str, str] = {
+LANGUAGE_TAG: Final[Dict[str, Dict[str, str]]] = {
     "Abap"         : dict(mark='* language: Abap', ext='abap'),
     "ActionScript" : dict(mark='// language: ActionScript', ext='as'),
     "Ada"          : dict(mark='-- language: Ada', ext='ada'),
@@ -73,9 +73,9 @@ LANGUAGE_TAG: Dict[str, str] = {
     "Verilog"      : dict(mark='// language: Verilog', ext='v'),
     "Visual Basic" : dict(mark='\' language: Visual Basic', ext='vb')
 }
-DOTENV_CONFIG = os.path.join('app', '.env')
-FASTAPI_ENV = os.getenv('FASTAPI_ENV') or 'stag'
-HUB_PATH = '/root/.cache/huggingface/hub'
+DOTENV_CONFIG: Final[str] = os.path.join('app', '.env')
+FASTAPI_ENV: Final[str] = os.getenv('FASTAPI_ENV') or 'stag'
+HUB_PATH: Final[str] = '/root/.cache/huggingface/hub'
 
 class Database(BaseSettings):
     redis: str = '10.99.104.251:8003' if FASTAPI_ENV == 'stag' else '172.17.1.242:6379'
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
         #### 🎮 Just enjoy it !\
         """)
     lang_tags  : Dict[str, Dict[str, str]] = LANGUAGE_TAG
-    private    : Config = Config(DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None)
+    private    : Config = Config(cast(str, DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None))
     models     : ModelConfig = ModelConfig()
     db         : Database = Database()
     load_dev   : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
