@@ -39,4 +39,4 @@ def get_tool_list() -> PlainTextResponse:
         scripts: List[str] = r.hkeys('gitlab-script-list')
         collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
     tools_text = '\n'.join(scripts + list(flatten(collections.get('children', []))))
-    return PlainTextResponse(tools_text, status_code=status.HTTP_200_OK)
+    return PlainTextResponse(tools_text)

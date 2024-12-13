@@ -1,4 +1,5 @@
 import os, textwrap
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from starlette.config import Config
 from typing import Dict, Final, cast
@@ -79,6 +80,7 @@ HUB_PATH: Final[str] = '/root/.cache/huggingface/hub'
 
 class Database(BaseSettings):
     redis: str = '10.99.104.251:8003' if FASTAPI_ENV == 'stag' else '172.17.1.242:6379'
+    mongo: str = '172.17.1.241:8156'
 
 class ChatModel(BaseSettings):
     name     : str = '/workspace/glm-4-9b-chat'
@@ -110,9 +112,20 @@ class Settings(BaseSettings):
 
         - **`CodeGeeX2-6B`** 🔗 [https://github.com/THUDM/CodeGeeX2](https://github.com/THUDM/CodeGeeX2)
         - **`GLM-4-9B-Chat`** 🔗 [https://github.com/THUDM/GLM-4](https://github.com/THUDM/GLM-4)
-        - **`GLM-4v-9B`** 🔗 [https://github.com/THUDM/GLM-4](https://github.com/THUDM/GLM-4)
+        - **`GLM-4v-9B` _(Multi Modal)_** 🔗 [https://github.com/THUDM/GLM-4](https://github.com/THUDM/GLM-4)
+        - **`llama3.2:3b`** 🔗 [https://ollama.com/library/llama3.2](https://ollama.com/library/llama3.2)
+        - **`llama3.2-vision:11b` _(Multi Modal)_** 🔗 [https://ollama.com/library/llama3.2-vision](https://ollama.com/library/llama3.2-vision)
 
         You could download these models from [Hugging Face](https://huggingface.co/THUDM) 🤗
+
+        Or `Llama3.2` models could be download with [ollama](https://github.com/ollama/ollama) _(Model Repository)_:
+
+        ```bash
+        curl -fsSL https://ollama.com/install.sh | sh
+        ollama serve
+        ollama pull llama3.2
+        ollama pull llama3.2-vision
+        ```
 
         ## 🚀 Quick Start
 
@@ -129,7 +142,12 @@ class Settings(BaseSettings):
     db         : Database = Database()
     load_dev   : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
     ssl_active : bool = (os.getenv('SERVE_HTTPS') or '').lower() == 'true'
+    timezone   : ZoneInfo = ZoneInfo('Asia/Shanghai')
 
 @lru_cache
 def get_settings():
-    return Settings()
+    settings = Settings()
+    for env_name in 'http_proxy', 'https_proxy':
+        os.environ[env_name] = settings.private.get('PROXY_URL', default='')
+    os.environ["NO_PROXY"] = '127.0.0.1'
+    return settings

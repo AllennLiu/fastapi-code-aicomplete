@@ -38,7 +38,7 @@ def save_code(base_url: str, lang: str, code: str) -> str:
     Save the model generated code to `Redis` which is going to
     be converted as the download **URL link** of API response.
     """
-    data = Script(code=code, created_at=datetime.datetime.now().strftime('%FT%T'))
+    data = Script(code=code, created_at=datetime.datetime.now(settings.timezone).strftime('%FT%T'))
     data.filename = (script_uuid := str(uuid.uuid4())) + f'.{settings.lang_tags[lang]["ext"]}'
     data.url = os.path.join(base_url, 'file/download/script', script_uuid)
     with RedisContextManager(settings.db.redis) as r:
@@ -54,7 +54,7 @@ async def create_coding_task(
     Create a **Single Round AI** programming which is like `Github Copilot` assistant.\n
     _(More parameters usage please refer to `Schema`)_
     """
-    begin = datetime.datetime.now()
+    begin = datetime.datetime.now(settings.timezone)
     pipeline: Pipeline = request.app.copilot.model
     if not settings.lang_tags.get(task.lang):
         lang_tag = ', '.join(settings.lang_tags)
@@ -64,11 +64,11 @@ async def create_coding_task(
     response = cast(str, pipeline.generate(
         prompt, do_sample=task.temperature > 0, **dict(CodingParam(**dict(task)))))
     if task.html:
-        return HTMLResponse(status_code=status.HTTP_200_OK, content=response)
-    return JSONResponse(status_code=status.HTTP_200_OK, content=dict(
+        return HTMLResponse(response)
+    return JSONResponse(dict(
         response=response,
         lang=task.lang,
-        datetime=(now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
+        datetime=(now := datetime.datetime.now(settings.timezone)).strftime('%Y-%m-%d %H:%M:%S'),
         elapsed_time=(now - begin).total_seconds(),
         url=save_code(str(request.base_url), task.lang, response)
     ))
@@ -120,4 +120,4 @@ async def get_languages() -> JSONResponse:
     """
     Listing currently **SUPPORT LANGUAGE** for AI programming.
     """
-    return JSONResponse(status_code=status.HTTP_200_OK, content=settings.lang_tags)
+    return JSONResponse(settings.lang_tags)

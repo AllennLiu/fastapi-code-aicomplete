@@ -181,7 +181,7 @@ async def create_chat_conversation(
     Create a **Single Round** chat conversation.\n
     _(More parameters usage please refer to `Schema`)_
     """
-    begin = datetime.datetime.now()
+    begin = datetime.datetime.now(settings.timezone)
     prompt = tw_to_cn.convert(chat_info.query)
     messages = merge_chat_history(chat_info)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=prompt))
@@ -189,10 +189,10 @@ async def create_chat_conversation(
     messages = list(remove_tool_calls(messages))
     save_chat_history(chat_info, messages)
     save_chat_record(prompt, content := messages[-1].content)
-    return JSONResponse(status_code=status.HTTP_200_OK, content=dict(
+    return JSONResponse(dict(
         response     = md_to_html(content) if chat_info.html else content,
         history      = to_dict_messages(messages),
-        datetime     = (now := datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'),
+        datetime     = (now := datetime.datetime.now(settings.timezone)).strftime('%Y-%m-%d %H:%M:%S'),
         elapsed_time = (now - begin).total_seconds()
     ))
 
@@ -206,7 +206,7 @@ async def get_chat_subject(request: Request, chat_info: Annotated[ChatInfo, Body
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat_info.query[:128]))
     subjects = await create_conversation(request.app.chatbot.model, chat_info, messages)
     resp = dict(subject=remove_punctuation(subjects[-1].content).capitalize()[:10])
-    return JSONResponse(status_code=status.HTTP_200_OK, content=resp)
+    return JSONResponse(resp)
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Chat')
 @load_model_catch

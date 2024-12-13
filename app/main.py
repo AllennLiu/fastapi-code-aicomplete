@@ -7,7 +7,7 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 from .utils import ML, load_llm
 from .config import get_settings
-from .routers import chat, chatutils, copilot, file
+from .routers import chat, chatutils, copilot, file, llama, plan
 
 settings = get_settings()
 
@@ -27,4 +27,5 @@ cors_allows = dict(allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 app.add_middleware(CORSMiddleware, **cors_allows)
 if settings.ssl_active:
     app.add_middleware(HTTPSRedirectMiddleware)
-for r in chat, chatutils, copilot, file: app.include_router(r.router)
+for r in chat, chatutils, copilot, file, llama, plan:
+    app.include_router(r.router)

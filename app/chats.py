@@ -36,7 +36,7 @@ SYSTEM_PROMPT: Final[ChatMessage] = ChatMessage(
     role=ChatMessage.ROLE_SYSTEM,
     content=textwrap.dedent("""\
     你是人工智能 AI 助手，你叫 Black.Milan，你是由 SIT TA 团队创造的。
-    你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。\
+    你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。
     """)
 )
 
