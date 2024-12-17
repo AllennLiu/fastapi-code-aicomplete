@@ -8,18 +8,19 @@ from ..config import get_settings
 from ..utils import md_no_codeblock, is_office_file
 from ..llama import LlamaOption, LlamaResponse, LlamaClient
 
-USER_PROMPT: Final[str] = """I don't need code to teach me how to write;
+PROMPT_FOR_SINGLE_ARRAY: Final[str] = """Just return a single JSON array, the array format must follow: ['A', 'B', 'C', …]."""
+USER_PROMPT: Final[str] = f"""I don't need code to teach me how to write;
+{PROMPT_FOR_SINGLE_ARRAY}
 I just need you to help me find the paths and download links for the tools or scripts here:"""
-USER_PROMPT_FOR_JSON: Final[str] = """I don't need code to teach me how to write;
-Just return a single JSON array, the array format must follow: ['A', 'B', 'C', …].
+USER_PROMPT_FOR_JSON: Final[str] = f"""I don't need code to teach me how to write;
+{PROMPT_FOR_SINGLE_ARRAY}
 Please help me find the JSON array within it:"""
 USER_PROMPT_EXAMPLE: Final[str] = f"""自动化脚本"SIT-BIOS-SUTInfoCheckTest"路径：
 https://sms-sit.inventec.com.cn/#
 /Scripts/SIT-BIOS-SUTInfoCheckTest"""
-SYSTEM_PROMPT: Final[Message] = Message(role='system', content="""\
+SYSTEM_PROMPT: Final[Message] = Message(role='system', content=f"""\
 Please find all tool or script paths in the input text if they exist.
-And the answers should only be organized into a single JSON array, \
-the array format must follow: ['A', 'B', 'C', …].
+{PROMPT_FOR_SINGLE_ARRAY}
 I just need the compiled answers; I don't need code on how to implement it.
 If none are found, return an empty array.""")
 
