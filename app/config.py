@@ -82,6 +82,11 @@ class Database(BaseSettings):
     redis: str = '10.99.104.251:8003' if FASTAPI_ENV == 'stag' else '172.17.1.242:6379'
     mongo: str = '172.17.1.241:8156'
 
+class RedisSettings(BaseSettings):
+    host: str = 'localhost'
+    port: int = 6379
+    db: int = 0
+
 class ChatModel(BaseSettings):
     name     : str = '/workspace/glm-4-9b-chat'
     quantize : int = 8
@@ -140,6 +145,7 @@ class Settings(BaseSettings):
     private    : Config = Config(cast(str, DOTENV_CONFIG if os.path.isfile(DOTENV_CONFIG) else None))
     models     : ModelConfig = ModelConfig()
     db         : Database = Database()
+    redis      : RedisSettings = RedisSettings()
     load_dev   : str = 'cuda' if os.getenv('LOAD_MODEL_DEVICE') == 'gpu' else 'cpu'
     ssl_active : bool = (os.getenv('SERVE_HTTPS') or '').lower() == 'true'
     timezone   : ZoneInfo = ZoneInfo('Asia/Shanghai')
@@ -150,4 +156,6 @@ def get_settings():
     for env_name in 'http_proxy', 'https_proxy':
         os.environ[env_name] = settings.private.get('PROXY_URL', default='')
     os.environ["NO_PROXY"] = '127.0.0.1'
+    settings.redis.host = settings.db.redis.split(':')[0]
+    settings.redis.port = int(settings.db.redis.split(':')[1])
     return settings

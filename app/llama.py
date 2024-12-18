@@ -8,7 +8,7 @@ from ollama import AsyncClient, ChatResponse, Message
 from typing import Any, Dict, List, AsyncIterator, Callable, Coroutine
 
 class LlamaResponse(BaseModel):
-    response: str
+    response: str | List[Any] | Dict[str, Any]
     messages: List[Dict[str, str] | Message] | None = []
     create_at: str = str(datetime.datetime.now(ZoneInfo('Asia/Shanghai')))
     elapsed_time: int | float | None = 0

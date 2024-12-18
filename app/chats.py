@@ -1,4 +1,4 @@
-import io, re, json, operator, textwrap, traceback
+import io, re, json, operator, textwrap, colorama, traceback
 import numpy as np
 import jieba.posseg as pseg
 from PIL import Image
@@ -6,11 +6,14 @@ from chatglm_cpp import Pipeline, ChatMessage
 from typing_extensions import Buffer
 from typing import Any, Dict, List, Callable, Final, Generator, Iterable, cast
 
+colorama.init(autoreset=True)
+
 try:
     from chatglm_cpp import Image as CImage
 except:
     import chatglm_cpp
-    print(f'WARNING: module chatglm_cpp {chatglm_cpp.__version__} is not support the Image object yet.')
+    print(f'{colorama.Fore.YELLOW}WARNING: module chatglm_cpp {chatglm_cpp.__version__} ' +
+        'is not support the Image object yet.')
 
 from .toolkit import Tools, register_tool
 from .utils import remove_punctuation, set_similarity
@@ -54,7 +57,8 @@ def run_func(name: str, arguments: str) -> str:
     Finally, it returns the response of **stringify** :class:`~dict`
     to next round conversation.
     """
-    print(f'Calling tool {name}, args: {arguments}')
+    print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} ', end='', flush=True)
+    print(f'Calling tool {colorama.Fore.MAGENTA}{name}{colorama.Fore.RESET}, args: {colorama.Fore.BLUE}{arguments}')
     def tool_call(**kwargs: Any) -> Dict[str, Any]:
         return kwargs
     func: Callable[..., Any] = getattr(Tools, name)
@@ -132,6 +136,7 @@ def select_tool_call(
     if not similarities: return
     for tool, percent in similarities:
         result = ai_sentences_similarity(pipeline, tool["description"], message.content)
+        print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} ', end='', flush=True)
         print(f'Func: {tool["name"]: <25} Similarity: {f"{percent}%": <8} AI: {result: >3}')
         if result == 'yes':
             results.append((tool, percent))

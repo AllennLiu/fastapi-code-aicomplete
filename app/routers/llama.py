@@ -41,7 +41,7 @@ async def create_messages(chat: LlamaChat) -> List[Message]:
     chat.messages.append(Message(role='user', content=chat.prompt))
     return chat.messages
 
-@router.post('/conversation', response_model=None, response_description='Chat Conversation')
+@router.post('/conversation', response_model=LlamaResponse, response_description='Chat Conversation')
 async def create_chat_conversation(chat: Annotated[LlamaChat, Body(...)]) -> LlamaResponse:
     """Create a single round chat conversation with the model
     ``llama3.2:3b`` _(Meta release)_.
@@ -67,7 +67,7 @@ async def create_chat_stream(chat: Annotated[LlamaChat, Body(...)]) -> Streaming
     chat.messages = await create_messages(chat)
     return StreamingResponse(create_streaming(chat), media_type='text/plain')
 
-@router.post('/image', response_model=None, response_description='Analyze Uploaded Image')
+@router.post('/image', response_model=LlamaResponse, response_description='Analyze Uploaded Image')
 async def analyze_uploaded_image(
     image: Annotated[UploadFile, File(..., description='A image to be analyzed')],
     prompt: Annotated[str, Form(..., description='Describe the requirement')] = '请示著描述这张图片'

@@ -1,7 +1,6 @@
 #!/bin/bash
 
 LOOP_KEEP=True
-WORKDIR=$PWD
 SERVE_PORT=7860
 SERVE_HOST=0.0.0.0
 SERVE_HTTPS=false
@@ -46,7 +45,7 @@ function config_sshd
     sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
     service ssh start || true
     ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa <<< y
-    echo $SSH_PUB_KEY > /root/.ssh/authorized_keys
+    echo "$SSH_PUB_KEY" > /root/.ssh/authorized_keys
 }
 
 function keyboard_interrupt

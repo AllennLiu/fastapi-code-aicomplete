@@ -1,4 +1,4 @@
-import os, re, redis, torch, string, opencc, pathlib, pymupdf, aiofiles, markdown, textwrap, mimetypes, itertools
+import os, re, redis, torch, string, opencc, pathlib, pymupdf, aiofiles, markdown, textwrap, itertools
 import markdown.blockprocessors
 from PIL import Image
 from docx import Document
@@ -274,26 +274,3 @@ def md_no_codeblock(md: str) -> str:
     """
     pattern_codeblock = re.compile(r'`{3}\w{0,}(.*)`{3}', re.DOTALL)
     return pattern_codeblock.sub(r'\1', md)
-
-def is_office_file(filepath: str) -> bool:
-    """Check specified file is ``Office`` format.
-
-    Args:
-        filepath (str): the file which will be guessed by
-            :func:`~mimetypes.guess_type` method.
-
-    Returns:
-        bool: is ``Office`` file or not.
-    """
-    office_extensions = { '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv' }
-    if not os.path.isfile(filepath):
-        _, ext = os.path.splitext(filepath)
-        return ext.lower() in office_extensions
-    mime_maps = { e for e in mimetypes.types_map.values() if ('ms' in e and 'app' in e) or 'csv' in e }
-    office_extras = {
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    }
-    mimetype, _ = mimetypes.guess_type(filepath)
-    return mimetype in mime_maps | office_extras

@@ -170,7 +170,7 @@ def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str |
                 raise TypeError(f'Annotation type for `{name}` must be :class:`~typing.Annotated`')
             _type, (desc, required) = annotation.__origin__, annotation.__metadata__
             _type = str(_type) if isinstance(_type, GenericAlias) else _type.__name__
-            tool_params.append(dict(ToolParameter(
-                name=name, description=desc, type=_type, required=required)))
-        docs.append(dict(ToolFunction(name=tool_name, description=tool_desc, params=tool_params)))
+            tool_params.append(ToolParameter(
+                name=name, description=desc, type=_type, required=required).model_dump())
+        docs.append(ToolFunction(name=tool_name, description=tool_desc, params=tool_params).model_dump())
     return docs
