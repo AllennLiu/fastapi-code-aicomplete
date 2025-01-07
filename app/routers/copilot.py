@@ -1,13 +1,12 @@
-import os, json, uuid, datetime
+import datetime
 from chatglm_cpp import Pipeline
 from asyncio import sleep as asleep
 from pydantic import BaseModel, Field
 from typing import Annotated, Final, cast
-from redis.asyncio import Redis as AsyncRedis
 from fastapi.templating import Jinja2Templates
 from fastapi import APIRouter, Request, WebSocket, HTTPException, status, Body
 from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
-
+from ..coder import save_code
 from ..config import get_settings
 from ..utils import copilot_prompt
 from ..catch import load_model_catch, websocket_catch
@@ -27,26 +26,6 @@ class Coding(CodingParam):
     prompt: str = Field(..., examples=[ 'Write a quick sort function' ], description='Describe program details')
     html: bool = Field(default=False, description='Response to `HTML` context directly')
 
-class Script(BaseModel):
-    code: str = ''
-    filename: str = ''
-    url: str = ''
-    created_at: str = '2024-07-29T14:35:04.380'
-    download_count: int = 0
-
-async def save_code(base_url: str, lang: str, code: str) -> str:
-    """
-    Save the model generated code to `Redis` which is going to
-    be converted as the download **URL link** of API response.
-    """
-    data = Script(code=code, created_at=datetime.datetime.now(settings.timezone).strftime('%FT%T'))
-    data.filename = (script_uuid := str(uuid.uuid4())) + f'.{settings.lang_tags[lang]["ext"]}'
-    data.url = os.path.join(base_url, 'file/download/script', script_uuid)
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    await r.hset('model-generated-scripts', script_uuid, json.dumps(data.model_dump(mode='json')))
-    await r.close()
-    return data.url
-
 @router.post('/coding', response_model=None, response_description='Code AI Completion')
 @load_model_catch
 async def create_coding_task(
@@ -60,8 +39,7 @@ async def create_coding_task(
     pipeline: Pipeline = request.app.copilot.model
     if not settings.lang_tags.get(task.lang):
         lang_tag = ', '.join(settings.lang_tags)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f'Invalid Language, Available: [{lang_tag}]')
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f'Invalid Language, Available: [{lang_tag}]')
     prompt, _ = copilot_prompt(settings.lang_tags, task.lang, task.prompt)
     response = cast(str, pipeline.generate(
         prompt, do_sample=task.temperature > 0, **CodingParam(**task.model_dump()).model_dump()))
@@ -72,7 +50,7 @@ async def create_coding_task(
         lang=task.lang,
         datetime=(now := datetime.datetime.now(settings.timezone)).strftime('%Y-%m-%d %H:%M:%S'),
         elapsed_time=(now - begin).total_seconds(),
-        url=await save_code(str(request.base_url), task.lang, response)
+        url=await save_code(settings, str(request.base_url), task.lang, response)
     ))
 
 @router.post('/stream', response_class=StreamingResponse, response_description='Streaming Code')

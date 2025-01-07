@@ -38,3 +38,5 @@ class LlamaClient:
 @dataclass(frozen=True)
 class LlamaSettings:
     stream_wait_time: float = .05
+    model_names: set[str] = field(
+        default_factory=lambda: { 'llama3.2', 'llama3.2-vision', 'qwen2.5:7b' })

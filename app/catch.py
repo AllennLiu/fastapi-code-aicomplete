@@ -23,8 +23,7 @@ def load_model_catch(
         except Exception as e:
             pattern = re.compile(f'no attribute \'{"|".join(SETTINGS.models.model_dump())}\'')
             if pattern.search(str(e)):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail='Model Not Loaded') from e
+                raise HTTPException(status.HTTP_404_NOT_FOUND, 'Model Not Loaded') from e
             raise e from e
     return wrapper
 

@@ -1,13 +1,12 @@
 import json, textwrap
 from operator import itemgetter
 from pydantic import BaseModel, Field
-from redis.asyncio import Redis as AsyncRedis
 from typing import Dict, List, Annotated, Final
 from fastapi.templating import Jinja2Templates
 from fastapi import APIRouter, Request, Body, Path
 from starlette.responses import JSONResponse, HTMLResponse
-
 from ..config import get_settings
+from ..db import RedisAsynchronous
 from ..chats import REGISTERED_TOOLS
 
 settings = get_settings()
@@ -36,43 +35,39 @@ async def show_toolkit() -> JSONResponse:
 
 @router.get('/tabs/{uuid}')
 async def get_chat_tabs(uuid: Annotated[str, Path(..., description='User `UUID`')]) -> JSONResponse:
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    name = f'talk-history-hash-{uuid}'
-    tabs = [
-        ChatTab(**json.loads(await r.hget(name, k) or '{}')).model_dump(mode='json')
-        for k in await r.hkeys(name)
-    ]
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        name = f'talk-history-hash-{uuid}'
+        tabs = [
+            ChatTab(**json.loads(await r.hget(name, k) or '{}')).model_dump(mode='json')
+            for k in await r.hkeys(name)
+        ]
     resp = sorted(tabs, key=itemgetter('datetime'), reverse=True)
     return JSONResponse(resp)
 
 @router.put('/tab/rename')
 async def rename_chat_tab(chat_tab: Annotated[ChatRename, Body(...)]) -> JSONResponse:
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    args = ( f'talk-history-hash-{chat_tab.uuid}', chat_tab.datetime )
-    data = json.loads(await r.hget(*args) or '{}') | dict(label=chat_tab.name)
-    await r.hset(*args, json.dumps(data, ensure_ascii=False))
-    resp = ChatTab(**json.loads(await r.hget(*args) or '{}')).model_dump(mode='json')
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        args = ( f'talk-history-hash-{chat_tab.uuid}', chat_tab.datetime )
+        data = json.loads(await r.hget(*args) or '{}') | dict(label=chat_tab.name)
+        await r.hset(*args, json.dumps(data, ensure_ascii=False))
+        resp = ChatTab(**json.loads(await r.hget(*args) or '{}')).model_dump(mode='json')
     return JSONResponse(resp)
 
 @router.get('/history/{uuid}/{datetime}')
 async def get_chat_history_by_datetime(
     uuid: Annotated[str, PATH_UUID], datetime: Annotated[str, PATH_DATE]
 ) -> JSONResponse:
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    data = json.loads(await r.hget(f'talk-history-hash-{uuid}', datetime) or '{}')
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        data = json.loads(await r.hget(f'talk-history-hash-{uuid}', datetime) or '{}')
     return JSONResponse(data.get('history', []))
 
 @router.delete('/history/{uuid}/{datetime}')
 async def delete_chat_history_by_datetime(
     uuid: Annotated[str, PATH_UUID], datetime: Annotated[str, PATH_DATE]
 ) -> JSONResponse:
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    await r.hdel(f'talk-history-hash-{uuid}', datetime)
-    result = await r.hget(f'talk-history-hash-{uuid}', datetime) is None
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        await r.hdel(f'talk-history-hash-{uuid}', datetime)
+        result = await r.hget(f'talk-history-hash-{uuid}', datetime) is None
     return JSONResponse(dict(ok=result))
 
 @router.delete('/forget/{uuid}/{range}')
@@ -87,8 +82,7 @@ async def clean_chat_history(
     - and so on ...
     """))]
 ) -> JSONResponse:
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    history: List[Dict[str, str]] = json.loads(await r.get(f'talk-history-{uuid}') or '[]')
-    await r.set(f'talk-history-{uuid}', json.dumps(history[: range * 2], ensure_ascii=False))
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        history: List[Dict[str, str]] = json.loads(await r.get(f'talk-history-{uuid}') or '[]')
+        await r.set(f'talk-history-{uuid}', json.dumps(history[: range * 2], ensure_ascii=False))
     return JSONResponse(dict(ok=True))

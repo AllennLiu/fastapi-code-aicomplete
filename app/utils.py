@@ -1,4 +1,4 @@
-import os, re, redis, torch, string, opencc, pathlib, pymupdf, aiofiles, markdown, textwrap, itertools
+import re, torch, string, opencc, pymupdf, asyncio, aiofiles, aiopathlib, colorama, markdown, textwrap, itertools
 import markdown.blockprocessors
 from PIL import Image
 from docx import Document
@@ -29,61 +29,10 @@ class ML:
     tokenizer : PreTrainedTokenizer | PreTrainedTokenizerFast | None = field()
     model     : chatglm_cpp.Pipeline = field()
 
-class RedisContextManager:
-    """A class used to handle Redis cache.
-
-    Attributes
-    ----------
-    host: str
-        The redis server host
-    db: int
-        The redis server db index
-    decode_responses: bool
-        Decode the responses of hash data
-
-    Examples
-    -------
-    ```
-    with RedisContextManager() as r:
-        r.exists(name)    : Boolean
-        r.ttl(name)       : Number
-        r.hget(name, key) : String
-        r.hgetall(name)   : Object<string>
-        r.hkeys(name)     : Array
-        r.hset(name, key, value)
-        r.hsetnx(name, key, value)
-        r.hdel(name, key)
-        r.delete(name)
-        r.expire(name, expired_time)
-    ```
-    Get hash keys:
-    ```
-    with RedisContextManager('127.0.0.1:6379') as r:
-        print(r.hkeys('my-data'))
-    ```
-    >>> ['a', 'b', 'c', 'd']
-    """
-    def __init__(self, host: str, db: int = 0, decode_responses: bool = True) -> None:
-        self.host = host.split(':')[0]
-        self.port = int(host.split(':')[1])
-        self.db = db
-        self.decode_responses = decode_responses
-
-    def __enter__(self) -> redis.Redis:
-        pool: redis.ConnectionPool = redis.ConnectionPool(
-            host=self.host,
-            port=self.port,
-            db=self.db,
-            decode_responses=self.decode_responses)
-        self.rd: redis.Redis = redis.Redis(connection_pool=pool)
-        return self.rd
-
-    def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
-        if self.rd is not None:
-            self.rd.connection_pool.disconnect()
-            self.rd.close()
-        if any((type, value, traceback)):
-            assert False, value
+def print_process(message: str) -> None:
+    """Print colorful message with process arrow."""
+    colorama.init(autoreset=True)
+    print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} {message}')
 
 def load_llm(
     name             : str,
@@ -179,29 +128,33 @@ async def read_file(file: UploadFile, uuid: str) -> str:
     文件為緩存至 `/tmp` 下，並依照對應文件副檔名讀取方法，轉換為
     文本後刪除
     """
-    file_path = f'/tmp/{uuid}{os.path.splitext(file.filename)[1]}'
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    async with aiofiles.open(file_path, 'wb') as out_file:
+    path = aiopathlib.AsyncPath(f'/tmp/{uuid}{file.filename.split(".")[-1]}')
+    abs_path = str(path.absolute())
+    await path.parent.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(path, 'wb') as out_file:
         buffer = cast(bytes, await file.read())
         await out_file.write(buffer)
-    if file_path.endswith('.pdf'):
-        content = ''.join(page.get_text() for page in pymupdf.open(file_path)).strip()
-    elif file_path.endswith('.docx'):
-        content = '\n'.join(paragraph.text for paragraph in Document(file_path).paragraphs)
-    elif file_path.endswith('.pptx'):
+    loop = asyncio.get_event_loop()
+    if path.name.endswith('.pdf'):
+        docs = await loop.run_in_executor(None, lambda: pymupdf.open(abs_path))
+        content = ''.join(page.get_text() for page in docs).strip()
+    elif path.name.endswith('.docx'):
+        doc = await loop.run_in_executor(None, lambda: Document(abs_path))
+        content = '\n'.join(paragraph.text for paragraph in doc.paragraphs)
+    elif path.name.endswith('.pptx'):
         content = ''
-        for slide in Presentation(file_path).slides:
+        present = await loop.run_in_executor(None, lambda: Presentation(abs_path))
+        for slide in present.slides:
             for shape in slide.shapes:
                 if hasattr(shape, 'text'):
                     content += f'{shape.text}\n'
-    elif file_path.endswith('.xlsx'):
-        wb = load_workbook(file_path)
+    elif path.name.endswith('.xlsx'):
+        wb = await loop.run_in_executor(None, lambda: load_workbook(abs_path))
         worksheets = cast(worksheet.Worksheet, wb.active).values
         content = '\n'.join(','.join(map(str, filter(bool, row))) for row in worksheets)
     else:
-        content = pathlib.Path(file_path).read_text(encoding='utf-8', errors='ignore')
-    if os.path.isfile(file_path):
-        os.remove(file_path)
+        content = await path.read_text(encoding='utf-8', errors='ignore')
+    await path.remove(missing_ok=True)
     return content.strip()
 
 def verify_image(filename: str) -> bool:

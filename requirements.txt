@@ -1,4 +1,6 @@
+aiohttp
 aiofiles
+aiopathlib
 fastapi
 uvicorn[standard]
 gunicorn

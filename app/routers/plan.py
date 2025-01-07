@@ -2,13 +2,13 @@ import re, httpx, colorama, datetime
 from ollama import ChatResponse, Message
 from fastapi import APIRouter, Body, Path
 from urllib.parse import ParseResult, urlparse
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, Dict, List, Annotated, Final, cast
+from ..utils import print_process
 from ..config import get_settings
+from ..db import MongoAsynchronous
 from ..llama import LlamaOption, LlamaResponse, LlamaClient
 
-PATTERN_UNIX_PATH: Final = re.compile(r'^(/[^/ ]*)+/?$')
 PARAM_PATH_PLAN_ID: Final = Path(..., example=15155, description='A number of ARES `Plan ID`')
 USER_PROMPT_EXAMPLE: Final[str] = f"""自动化脚本"SIT-BIOS-SUTInfoCheckTest"路径：
 https://sms-sit.inventec.com.cn/#
@@ -63,10 +63,8 @@ async def ai_summary(prerequisite: Prerequisite, maximum_retry: int = 3) -> tupl
     chat = PlanChat(prompt=f'{prerequisite.prerequisite}. Return a list of tools in JSON format.')
     for retry in range(maximum_retry):
         try:
-            print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} ', end='', flush=True)
-            print(f'BKM UUID is: {colorama.Fore.YELLOW}{prerequisite.bkm_uuid}')
-            print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} ', end='', flush=True)
-            print(f'predict: {colorama.Fore.MAGENTA}{prerequisite.prerequisite}')
+            print_process(f'BKM UUID is: {colorama.Fore.YELLOW}{prerequisite.bkm_uuid}')
+            print_process(f'predict: {colorama.Fore.MAGENTA}{prerequisite.prerequisite}')
             response = cast(ChatResponse, await client.base(
                 messages = [ SYSTEM_PROMPT, Message(role='user', content=chat.prompt) ],
                 format   = Tools.model_json_schema(),
@@ -74,14 +72,13 @@ async def ai_summary(prerequisite: Prerequisite, maximum_retry: int = 3) -> tupl
             ))
             elapsed_time += cast(int, response.total_duration)
             tools = Tools.model_validate_json(response["message"]["content"])
-            print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} ', end='', flush=True)
-            print(f'response:\n{colorama.Fore.GREEN}{tools}')
+            print_process(f'response:\n{colorama.Fore.GREEN}{tools}')
             return tools, elapsed_time
         except httpx.ReadTimeout:
             print(f'{error_msg}\nException error: Predict TimeOut')
         except Exception as e:
             print(f'{error_msg}\nException error: {str(e)}')
-        print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} retry {retry + 1} times ...')
+        print_process(f'{colorama.Fore.YELLOW}retry {retry + 1} times ...')
     return Tools(tools=[]), elapsed_time
 
 async def get_plan_prerequisites(plan_id: int) -> List[Prerequisite]:
@@ -94,26 +91,43 @@ async def get_plan_prerequisites(plan_id: int) -> List[Prerequisite]:
     Returns:
         List[Dict[str, str]]: a list of case UUID + prerequisite.
     """
-    client = AsyncIOMotorClient(f'mongodb://{settings.db.mongo}')
-    db = client["chrysaetos"]
-    collection = db["plans"]
-    plan = cast(Dict[str, Any], await collection.find_one(dict(plan_id=plan_id)))
-    collection = db["cases"]
-    prerequisites: List[Prerequisite] = []
-    async for case in collection.find(dict(case_plan_uuid=plan["plan_uuid"])):
-        bkm = case.get('case_bkm') or {}
-        if not str(prerequisite := bkm.get('bkm_prerequisite') or '').strip():
-            continue
-        prerequisites.append(Prerequisite(bkm_uuid=bkm.get('bkm_uuid', ''), prerequisite=prerequisite))
+    pipeline = [
+        { "$match": { "case_status": 1, "case_report": "1" } },
+        {
+            "$lookup": {
+                "from"    : "bkms",
+                "let"     : { "bkm_uuid": "$case_bkm_uuid" },
+                "pipeline": [
+                    { "$match": { "$expr": { "$eq": [ '$bkm_uuid', '$$bkm_uuid' ] } } },
+                    { "$project": { "bkm_id": 1, "bkm_uuid": 1, "bkm_prerequisite": 1, "_id": 0 } }
+                ],
+                "as": "case_bkm"
+            }
+        },
+        { "$unwind": { "path": "$case_bkm", "preserveNullAndEmptyArrays": True } }
+    ]
+    async with MongoAsynchronous(settings.db.mongo).connect() as m:
+        db = m.chrysaetos
+        collection = db.plans
+        plan = cast(Dict[str, Any], await collection.find_one(dict(plan_id=plan_id)))
+        cases = db.cases.aggregate(pipeline)
+        prerequisites: List[Prerequisite] = []
+        async for case in collection.find(dict(case_plan_uuid=plan["plan_uuid"])):
+            bkm = case.get('case_bkm') or {}
+            if not str(prerequisite := bkm.get('bkm_prerequisite') or '').strip():
+                continue
+            prerequisites.append(Prerequisite(bkm_uuid=bkm.get('bkm_uuid', ''), prerequisite=prerequisite))
     return prerequisites
 
 def tools_summary(tools: Tools) -> ToolSummary:
+    """Processing structured response fulfill customize requirement."""
+    pattern_unix_path = re.compile(r'^(/[^/ ]*)+/?$')
     summary = ToolSummary(paths=set(), urls=set())
     for tool in tools.tools:
         parsed_url: ParseResult = urlparse(tool.url)
         if 'inventec.com' in parsed_url.netloc:
-            summary.paths.add(tool.url)
-        if bool(PATTERN_UNIX_PATH.match(tool.path)):
+            summary.urls.add(tool.url)
+        if bool(pattern_unix_path.match(tool.path)):
             summary.paths.add(tool.path)
     return summary
 
@@ -140,6 +154,7 @@ async def plan_prerequisite_summary(plan_id: Annotated[int, PARAM_PATH_PLAN_ID])
     tools = Tools(tools=[])
     elapsed_time = 0
     prerequisites = await get_plan_prerequisites(plan_id)
+    print_process(f'Total process {colorama.Fore.MAGENTA}case{colorama.Fore.RESET} number: {colorama.Fore.RED}{len(prerequisites)}')
     for prerequisite in prerequisites:
         _tools, _elapsed_time = await ai_summary(prerequisite)
         tools.tools.extend(_tools.tools)

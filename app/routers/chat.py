@@ -1,14 +1,13 @@
 import json, copy, asyncio, colorama, datetime, operator, contextlib
 from pydantic import BaseModel, Field
-from redis.asyncio import Redis as AsyncRedis
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
 from starlette.responses import JSONResponse, StreamingResponse
 from typing import Dict, List, Annotated, AsyncIterator, Final, Generator, Iterable, cast
 from fastapi import APIRouter, Request, WebSocket, HTTPException, UploadFile, status, File, Form, Body
-
 from ..config import get_settings
+from ..db import RedisAsynchronous
 from ..catch import load_model_catch, websocket_catch
-from ..utils import block_bad_words, remove_punctuation, read_file, md_to_html, tw_to_cn
+from ..utils import print_process, block_bad_words, remove_punctuation, read_file, md_to_html, tw_to_cn
 from ..chats import observe, func_called, remove_tool_calls, compress_message, to_chat_messages, to_dict_messages, insert_image, SYSTEM_PROMPT
 
 colorama.init(autoreset=True)
@@ -46,13 +45,12 @@ async def merge_chat_history(chat_info: ChatInfo) -> List[ChatMessage]:
             messages[0: 0] = [ prompt ]
         return messages
     messages: List[ChatMessage] = []
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    if chat_info.label:
-        query = await r.hget(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime', ''))
-        histories = json.loads(query or '{}').get('history', [])
-    else:
-        histories = json.loads(await r.get(f'talk-history-{chat_info.uuid}') or '[]')
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        if chat_info.label:
+            query = await r.hget(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime', ''))
+            histories = json.loads(query or '{}').get('history', [])
+        else:
+            histories = json.loads(await r.get(f'talk-history-{chat_info.uuid}') or '[]')
     for history in histories:
         if history["role"] == ChatMessage.ROLE_SYSTEM and prompt.content not in history["content"]:
             history |= dict(content=prompt.content + history["content"])
@@ -68,20 +66,18 @@ async def save_chat_history(chat_info: ChatInfo, messages: Iterable[ChatMessage]
     """
     if not chat_info.uuid: return
     data = to_dict_messages(messages)
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    if chat_info.label:
-        stringify = json.dumps(dict(**chat_info.label, history=data), ensure_ascii=False)
-        await r.hset(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime', ''), stringify)
-    else:
-        await r.set(f'talk-history-{chat_info.uuid}', json.dumps(data, ensure_ascii=False))
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        if chat_info.label:
+            stringify = json.dumps(dict(**chat_info.label, history=data), ensure_ascii=False)
+            await r.hset(f'talk-history-hash-{chat_info.uuid}', chat_info.label.get('datetime', ''), stringify)
+        else:
+            await r.set(f'talk-history-{chat_info.uuid}', json.dumps(data, ensure_ascii=False))
 
 async def save_chat_record(prompt: str, response: str) -> None:
-    r = AsyncRedis(**settings.redis.model_dump(), decode_responses=True)
-    records: List[Dict[str, str]] = json.loads(await r.get(f'talk-history-records') or '[]')
-    records.append(dict(user=prompt, assistant=response))
-    await r.set(f'talk-history-records', json.dumps(records, ensure_ascii=False))
-    await r.close()
+    async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
+        records: List[Dict[str, str]] = json.loads(await r.get(f'talk-history-records') or '[]')
+        records.append(dict(user=prompt, assistant=response))
+        await r.set(f'talk-history-records', json.dumps(records, ensure_ascii=False))
 
 async def create_conversation(
     pipeline: Pipeline, chat_info: ChatInfo, messages: List[ChatMessage]
@@ -113,8 +109,7 @@ async def create_streaming(
     pipeline: Pipeline = request.app.chatbot.model
     copies = copy.deepcopy(to_dict_messages(messages))
     compresses = compress_message(to_chat_messages(copies), pipeline, chat_info.max_length)
-    print(f'{colorama.Fore.LIGHTCYAN_EX} ➠{colorama.Fore.RESET} ', end='', flush=True)
-    print(f'Num: {colorama.Fore.RED}{len(compresses)}{colorama.Fore.RESET} ' +
+    print_process(f'Num: {colorama.Fore.RED}{len(compresses)}{colorama.Fore.RESET} ' +
         f'Len: {colorama.Fore.RED}{sum(len(m.content) for m in compresses)}')
     param = ChatParam(**chat_info.model_dump())
     streaming = pipeline.chat(
@@ -243,8 +238,7 @@ async def create_chat_file_stream(
     """
     chat = ChatInfo(uuid=uuid, query=await read_file(file, uuid), label=json.loads(label), system=system)
     if not chat.query:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid File Content')
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, 'Invalid File Content')
     messages = await merge_chat_history(chat)
     messages.append(ChatMessage(role=ChatMessage.ROLE_USER, content=chat.query))
     return StreamingResponse(file_stream(

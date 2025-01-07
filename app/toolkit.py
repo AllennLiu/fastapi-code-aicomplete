@@ -1,10 +1,10 @@
 import os, json, requests, inspect, paramiko
 from types import GenericAlias
 from pydantic import BaseModel
-from typing import Dict, List, Annotated, Generator, get_origin
+from typing import Any, Dict, List, Annotated, Generator, get_origin, cast
 
 from .config import get_settings
-from .utils import RedisContextManager
+from .db import RedisAsynchronous
 
 settings = get_settings()
 
@@ -41,23 +41,22 @@ class Tools:
         """
         代码生成，语言: xxx，提示: 写一个 xxxxxxxx 的功能
         """
-        url = 'https://ares-copilot-sit.inventec.com.cn/copilot/coding'
-        headers = { "Content-Type": "application/json" }
-        payload = json.dumps(dict(
-            max_length  = 1024,
-            top_k       = 1,
-            top_p       = 0.95,
-            temperature = 0.2,
-            lang        = language.capitalize(),
-            prompt      = prompt,
-            html        = False
-        ))
-        print(f'posting: {url}')
-        response = requests.post(url, headers=headers, data=payload, verify=False)
-        response.raise_for_status()
-        print(data := response.json())
-        message = f'耗时：{round(data["elapsed_time"])}秒，请点击连结下载脚本'
-        return json.dumps(dict(message=message, url=data.get('url')), ensure_ascii=False)
+        with requests.Session() as session:
+            session.headers.update({ "Content-Type": "application/json" })
+            res: requests.Response = session.post(
+                url  = 'https://ares-ai-sit.inventec.com.cn/chat/conversation',
+                data = json.dumps(dict(query=f'Please translate this to English: {prompt}'))
+            )
+            res.raise_for_status()
+            print(translation := res.json())
+            res: requests.Response = session.post(
+                url  = 'https://ares-ai-sit.inventec.com.cn/llama/code',
+                data = json.dumps(dict(prompt=translation["response"], lang=language))
+            )
+            res.raise_for_status()
+            print(result := res.json())
+        message = f'耗时：{round(result["elapsed_time"])}秒，请点击连结下载脚本'
+        return json.dumps(dict(message=message, url=result["response"]), ensure_ascii=False)
 
     @staticmethod
     def get_weather(city_name: Annotated[str, 'The name of the city to be queried', True]) -> str:
@@ -120,20 +119,23 @@ class Tools:
                 else:
                     if filename.lower() in file.get('title', '').lower():
                         yield file.get('path', '')
+
         validate_path = json.loads(Tools.get_shell(host, password, f'ls {path}'))
         if validate_path.get('status_code', -1) != 0:
             return validate_path.get('output', '无法连线或发生例外错误')
         files: List[ToolDownload] = []
         responses: List[Dict[str, str] | str] = []
         api_url = 'https://ares-fastapi-sit.inventec.com.cn/api/v1'
-        with RedisContextManager(settings.db.redis) as r:
-            collections: dict = eval(r.hget('script-management-collections', 'Collection') or '{}')
+
+        with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).sync_connect() as r:
             for script in r.hkeys('gitlab-script-list'):
                 if filename.lower() in script.lower():
-                    script_data: dict = eval(r.hget('gitlab-script-list', script) or '{}')
+                    script_data: Dict[str, Any] = eval(r.hget('gitlab-script-list', script) or '{}')
                     files.append(ToolDownload(
                         filename=f'{script}-{script_data.get("rev", "master")}.zip',
                         link=os.path.join(api_url, 'scripts/download', script, 'master')))
+            collections: Dict[str, Any] = eval(r.hget('script-management-collections', 'Collection') or '{}')
+
         for tool in search(collections.get('children', []), filename):
             files.append(ToolDownload(
                 filename=os.path.basename(tool),
