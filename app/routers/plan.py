@@ -92,7 +92,6 @@ async def get_plan_prerequisites(plan_id: int) -> List[Prerequisite]:
         List[Dict[str, str]]: a list of case UUID + prerequisite.
     """
     pipeline = [
-        { "$match": { "case_status": 1, "case_report": "1" } },
         {
             "$lookup": {
                 "from"    : "bkms",
@@ -110,9 +109,11 @@ async def get_plan_prerequisites(plan_id: int) -> List[Prerequisite]:
         db = m.chrysaetos
         collection = db.plans
         plan = cast(Dict[str, Any], await collection.find_one(dict(plan_id=plan_id)))
+        match = dict(case_status=1, case_report='1', case_plan_uuid=plan["plan_uuid"])
+        pipeline[0: 0] = [ { "$match": match } ]
         cases = db.cases.aggregate(pipeline)
         prerequisites: List[Prerequisite] = []
-        async for case in collection.find(dict(case_plan_uuid=plan["plan_uuid"])):
+        async for case in cases:
             bkm = case.get('case_bkm') or {}
             if not str(prerequisite := bkm.get('bkm_prerequisite') or '').strip():
                 continue
@@ -142,7 +143,7 @@ async def prerequisite_summary(data: Annotated[PlanChat, Body(...)]) -> LlamaRes
     )
 
 @router.post(
-    '/plan/prerequisite/{plan_id}',
+    '/prerequisite/{plan_id}',
     response_model=LlamaResponse,
     response_description='Plan Prerequisites Summary'
 )
