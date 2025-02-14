@@ -15,12 +15,10 @@ FORM_RENEW: Final = Form(..., description='Renew the prediction jobs')
 USER_PROMPT_EXAMPLE: Final[str] = f"""自动化脚本"SIT-BIOS-SUTInfoCheckTest"路径：
 https://sms-sit.inventec.com.cn/#
 /Scripts/SIT-BIOS-SUTInfoCheckTest"""
-PROMPT_FOR_SINGLE_ARRAY: Final[str] = """\
-Just return a single JSON array, the array format must be list[str]."""
 SYSTEM_PROMPT: Final[ChatMessage] = ChatMessage(role='system', content=f"""\
-Please find the URLs and file paths for the tools or scripts in user's input if they exist.
-{PROMPT_FOR_SINGLE_ARRAY}
-I just need the compiled answers; I don't need code on how to implement it.
+Please find the download URLs or tool/script paths in user's input content if they exist.
+And if found URLs the domain must be `inventec.com` or `inventec.com.cn`.
+Just return the result as a single JSON list, the format must be list[str].
 """)
 
 class SummaryResult(BaseModel):
