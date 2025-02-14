@@ -1,5 +1,5 @@
 import json, copy, asyncio, colorama, datetime, operator, contextlib
-from pydantic import BaseModel, Field
+from pydantic import Field
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
 from starlette.responses import JSONResponse, StreamingResponse
 from typing import Dict, List, Annotated, AsyncIterator, Final, Generator, Iterable, cast
@@ -8,7 +8,7 @@ from ..config import get_settings
 from ..db import RedisAsynchronous
 from ..catch import load_model_catch, websocket_catch
 from ..utils import print_process, block_bad_words, remove_punctuation, read_file, md_to_html, tw_to_cn
-from ..chats import observe, func_called, remove_tool_calls, compress_message, to_chat_messages, to_dict_messages, insert_image, SYSTEM_PROMPT
+from ..chats import ChatOption, ChatResponse, observe, func_called, remove_tool_calls, compress_message, to_chat_messages, to_dict_messages, insert_image, SYSTEM_PROMPT
 
 colorama.init(autoreset=True)
 settings = get_settings()
@@ -17,13 +17,7 @@ STREAM_WAIT_TIME: Final[float] = .05
 FORM_UUID: Final = Form(..., description='User `UUID`')
 FORM_LABEL: Final = Form(..., description='**Stringify** `JSON` label data')
 
-class ChatParam(BaseModel):
-    max_length: int = Field(default=2500, le=2500, description='Response length maximum is `2500`')
-    top_p: float = Field(default=.8, description='Lower values **reduce `diversity`** and focus on more **probable tokens**')
-    temperature: float = Field(default=.8, description='Higher will make **outputs** more `random` and `diverse`')
-    repetition_penalty: float = Field(default=1., le=1., description='Higher values bot will not be repeating')
-
-class ChatInfo(ChatParam):
+class ChatInfo(ChatOption):
     uuid: str | None = Field(default='', description='User `UUID` _(empty will be without Redis cache)_')
     query: str = Field(..., examples=[ '你好' ], description='Message content')
     history: List[Dict[str, str]] = Field(default=[], description='Conversation history list for assistant reference')
@@ -89,7 +83,7 @@ async def create_conversation(
     assistant to assess tool function response for recommending that
     user how to do.
     """
-    param = ChatParam(**chat_info.model_dump())
+    param = ChatOption(**chat_info.model_dump())
     response = cast(ChatMessage, pipeline.chat(
         messages, **param.model_dump(), do_sample=param.temperature > 0))
     response.content = block_bad_words(response.content).lstrip()
@@ -111,7 +105,7 @@ async def create_streaming(
     compresses = compress_message(to_chat_messages(copies), pipeline, chat_info.max_length)
     print_process(f'Num: {colorama.Fore.RED}{len(compresses)}{colorama.Fore.RESET} ' +
         f'Len: {colorama.Fore.RED}{sum(len(m.content) for m in compresses)}')
-    param = ChatParam(**chat_info.model_dump())
+    param = ChatOption(**chat_info.model_dump())
     streaming = pipeline.chat(
         compresses, **param.model_dump(), do_sample=param.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
@@ -140,7 +134,7 @@ async def file_stream(
 ) -> AsyncIterator[str]:
     chat.query = tw_to_cn.convert(chat.query)
     streaming = pipeline.chat(
-        messages, **ChatParam(**chat.model_dump()).model_dump(), do_sample=True, stream=True)
+        messages, **ChatOption(**chat.model_dump()).model_dump(), do_sample=True, stream=True)
     chunks: List[DeltaMessage] = []
     with contextlib.suppress(asyncio.CancelledError):
         for chunk in cast(Generator[DeltaMessage, None, None], streaming):
@@ -160,7 +154,7 @@ async def create_socket(
     Similar as :func:`~create_conversation` the only difference is
     that chat pipeline is created by streaming :class:`~WebSocket`.
     """
-    param = ChatParam()
+    param = ChatOption()
     streaming = pipeline.chat(messages, **param.model_dump(), do_sample=param.temperature > 0, stream=True)
     chunks: List[DeltaMessage] = []
     with contextlib.suppress(asyncio.CancelledError):
@@ -175,10 +169,10 @@ async def create_socket(
         return await create_socket(websocket, pipeline, await observe(messages))
     return messages
 
-@router.post('/conversation', response_model=None, response_description='Chat Conversation')
+@router.post('/conversation', response_model=ChatResponse, response_description='Chat Conversation')
 async def create_chat_conversation(
     request: Request, chat_info: Annotated[ChatInfo, Body(...)]
-) -> JSONResponse:
+) -> ChatResponse:
     """
     Create a **Single Round** chat conversation.\n
     _(More parameters usage please refer to `Schema`)_
@@ -191,12 +185,12 @@ async def create_chat_conversation(
     messages = list(remove_tool_calls(messages))
     await save_chat_history(chat_info, messages)
     await save_chat_record(prompt, content := messages[-1].content)
-    return JSONResponse(dict(
+    return ChatResponse(
         response     = md_to_html(content) if chat_info.html else content,
         history      = to_dict_messages(messages),
         datetime     = (now := datetime.datetime.now(settings.timezone)).strftime('%Y-%m-%d %H:%M:%S'),
         elapsed_time = (now - begin).total_seconds()
-    ))
+    )
 
 @router.post('/subject', response_model=None, response_description='Conversation Subject')
 async def get_chat_subject(request: Request, chat_info: Annotated[ChatInfo, Body(...)]) -> JSONResponse:

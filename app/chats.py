@@ -1,8 +1,10 @@
-import io, re, json, operator, textwrap, colorama, traceback
+import io, re, json, datetime, operator, textwrap, colorama, traceback
 import numpy as np
 import jieba.posseg as pseg
 from PIL import Image
+from zoneinfo import ZoneInfo
 from chatglm_cpp import Pipeline, ChatMessage
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Buffer
 from typing import Any, Dict, List, Callable, Final, Generator, Iterable, cast
 
@@ -42,6 +44,22 @@ SYSTEM_PROMPT: Final[ChatMessage] = ChatMessage(
     你是基于 BU6 SIT TA 团队开发与发明的，你被该团队长期训练而成为优秀的助理。
     """)
 )
+
+class ChatOption(BaseModel):
+    max_length: int = Field(default=2500, le=2500, description='Response length maximum is `2500`')
+    top_p: float = Field(default=.8, description='Lower values **reduce `diversity`** and focus on more **probable tokens**')
+    temperature: float = Field(default=.8, description='Higher will make **outputs** more `random` and `diverse`')
+    repetition_penalty: float = Field(default=1., le=1., description='Higher values bot will not be repeating')
+
+class ChatResponse(BaseModel):
+    response: str | List[Any] | Dict[str, Any]
+    history: List[Dict[str, str]] | None = []
+    datetime: str = datetime.datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')
+    elapsed_time: int | float | None = 0
+
+    @field_validator('elapsed_time', mode='before')
+    def round_decimal_places(cls, value):
+        return round(value, 4)
 
 def func_called(message: ChatMessage) -> bool:
     """

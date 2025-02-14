@@ -69,6 +69,7 @@ function main
     fi
     test -z "$MODE_CHATBOT" -a -z "$MODE_CODE" -a -z "$MODE_MULTIMODAL" && \
         echo "Please specify an option for enabling at least one of model." && exit 1
+    echo "Clearing model prediction core dump files." && rm -f core.*
     gunicorn app.main:app -n black-milan -b ${SERVE_HOST}:$SERVE_PORT \
         -t 600 --graceful-timeout 600 --keep-alive 600 $ssl_para_line \
         --worker-connections 1 --reload -w $WORKER_NUM -k uvicorn.workers.UvicornWorker
