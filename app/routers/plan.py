@@ -16,9 +16,9 @@ USER_PROMPT_EXAMPLE: Final[str] = f"""自动化脚本"SIT-BIOS-SUTInfoCheckTest"
 https://sms-sit.inventec.com.cn/#
 /Scripts/SIT-BIOS-SUTInfoCheckTest"""
 SYSTEM_PROMPT: Final[ChatMessage] = ChatMessage(role='system', content=f"""\
-Please find the download URLs or tool/script paths in user's input content if they exist.
-And if found URLs the domain must be `inventec.com` or `inventec.com.cn`.
+Please find the URLs or tool/script paths in user's input content if they exist.
 Just return the result as a single JSON list, the format must be list[str].
+I just need the compiled answers; I don't need code on how to implement it.
 """)
 
 class SummaryResult(BaseModel):
@@ -203,7 +203,7 @@ async def create_prerequisites_job(
     return jobs
 
 async def predict_prerequisites_job(
-    pipeline: Pipeline, jobs: List[PrerequisiteJob], plan_uuid: str
+    pipeline: Pipeline, jobs: List[PrerequisiteJob], plan_id: int, plan_uuid: str
 ) -> Dict[str, Dict[str, List[str] | float]]:
     """Asynchronous to predict the prerequisites of each test cases
     by ``ARES plan UUID`` with ``Redis`` and ``ChatGLM`` model,
@@ -225,7 +225,7 @@ async def predict_prerequisites_job(
         tables = cast(Dict[str, Dict[str, List[str] | float]], json.loads(query or '{}'))
         num = len(list(itertools.filterfalse(operator.attrgetter('completed'), jobs)))
         rate = 100 / len(jobs)
-        print_process(f'TODO {colorama.Fore.BLUE}case\'s job{colorama.Fore.RESET} remain: {colorama.Fore.RED}{num}')
+        print_process(f'TODO plan: {colorama.Fore.MAGENTA}{plan_uuid}({plan_id}) {colorama.Fore.BLUE}case\'s job{colorama.Fore.RESET} remain: {colorama.Fore.RED}{num}')
         for job in itertools.filterfalse(operator.attrgetter('completed'), jobs):
             if job.bkm_uuid not in tables:
                 tables[job.bkm_uuid] = PrerequisiteTable().model_dump(mode='json')
@@ -300,7 +300,7 @@ async def plan_prerequisite_summary(
     await cleanup_model_core_dump()
     todos = await get_prerequisites_todo(plan_uuid := await get_plan_uuid_by_id(plan_id))
     jobs = await create_prerequisites_job(todos, plan_uuid, renew)
-    table = await predict_prerequisites_job(request.app.chatbot.model, jobs, plan_uuid)
+    table = await predict_prerequisites_job(request.app.chatbot.model, jobs, plan_id, plan_uuid)
     result, elapsed_time = summary_tools(table)
     return ChatResponse(
         response=result.model_dump(mode='json'),
@@ -317,7 +317,7 @@ async def plan_prerequisite_progress(plan_id: Annotated[int, PARAM_PATH_PLAN_ID]
     async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
         query = await r.hget('model-prerequisites-job', plan_uuid)
         jobs = cast(List[Dict[str, Any]], json.loads(query or '[]'))
-        progress = int(sum(map(operator.itemgetter('rate'), jobs)))
+        progress = int(round(sum(map(operator.itemgetter('rate'), jobs))))
     return JSONResponse(dict(plan_uuid=plan_uuid, progress=progress))
 
 @router.delete('/prerequisite/{plan_id}')
