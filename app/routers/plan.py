@@ -223,7 +223,7 @@ async def predict_prerequisites_job(
     async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
         query = await r.hget('model-prerequisites-table', plan_uuid)
         tables = cast(Dict[str, Dict[str, List[str] | float]], json.loads(query or '{}'))
-        num = len(list(itertools.filterfalse(operator.attrgetter('completed'), jobs)))
+        num = sum(1 for _ in itertools.filterfalse(operator.attrgetter('completed'), jobs))
         rate = 100 / len(jobs)
         print_process(f'TODO plan: {colorama.Fore.MAGENTA}{plan_uuid}({plan_id}) {colorama.Fore.BLUE}case\'s job{colorama.Fore.RESET} remain: {colorama.Fore.RED}{num}')
         for job in itertools.filterfalse(operator.attrgetter('completed'), jobs):
@@ -317,8 +317,9 @@ async def plan_prerequisite_progress(plan_id: Annotated[int, PARAM_PATH_PLAN_ID]
     async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
         query = await r.hget('model-prerequisites-job', plan_uuid)
         jobs = cast(List[Dict[str, Any]], json.loads(query or '[]'))
+        completed = sum(map(operator.itemgetter('completed'), jobs))
         progress = int(round(sum(map(operator.itemgetter('rate'), jobs))))
-    return JSONResponse(dict(plan_uuid=plan_uuid, progress=progress))
+    return JSONResponse(dict(plan_uuid=plan_uuid, progress=progress, completed=f'{completed}/{len(jobs)}'))
 
 @router.delete('/prerequisite/{plan_id}')
 async def remove_prerequisites_job(plan_id: Annotated[int, PARAM_PATH_PLAN_ID]) -> JSONResponse:

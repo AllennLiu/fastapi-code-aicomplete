@@ -1,7 +1,7 @@
 import os, json, requests, inspect, paramiko
 from types import GenericAlias
 from pydantic import BaseModel
-from typing import Any, Dict, List, Annotated, Generator, get_origin, cast
+from typing import Any, Dict, List, Annotated, Generator, get_origin
 
 from .config import get_settings
 from .db import RedisAsynchronous
@@ -153,9 +153,16 @@ class Tools:
 
 def register_tool(instance: object) -> List[Dict[str, str | List[Dict[str, str | bool]]]]:
     """
-    Parsing tool function calls by :class:`~staticmethod` of\
+    Parsing tool function calls by :class:`~staticmethod` of \
     :class:`~Tools` object, it generate function document and
     type hint of parameter to be system prompt definitions.
+
+    Args:
+        instance (object): :class:`~Tools` object.
+
+    Returns:
+        List[Dict[str, str | List[Dict[str, str | bool]]]]: \
+            Tool function document and type hint of parameter.
     """
     docs: List[Dict[str, str | List[Dict[str, str | bool]]]] = []
     for func in instance.__dict__.values():

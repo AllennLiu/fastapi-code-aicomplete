@@ -30,6 +30,14 @@ def build_tool_system_prompt(content: str, tools: List[dict] = REGISTERED_TOOLS)
     """
     Appending all available :class:`~Tools` to system prompt
     message, this method is fitting with the ``GLM-4`` model.
+
+    Args:
+        content (str): System prompt message.
+        tools (List[dict]): Available tools data. Defaults to \
+            `REGISTERED_TOOLS`.
+
+    Returns:
+        ChatMessage: ChatGLM message instance with system prompt.
     """
     content += '\n\n# 可用工具'
     for tool in tools:
@@ -64,7 +72,14 @@ class ChatResponse(BaseModel):
 def func_called(message: ChatMessage) -> bool:
     """
     Determine whether the first line of message content which name is
-    included in `REGISTERED_TOOLS` _(this available :class:`~Tools`)_.
+    included in `REGISTERED_TOOLS`. _(this available :class:`~Tools`)_
+
+    Args:
+        message (ChatMessage): ChatGLM message instance.
+
+    Returns:
+        bool: Whether the first line of message content which name is \
+            included in `REGISTERED_TOOLS`.
     """
     return message.content.splitlines()[0] in map(operator.itemgetter('name'), REGISTERED_TOOLS)
 
@@ -76,6 +91,12 @@ def escape_json_values(json_string: str) -> str:
 
     Therefore, this function is used to attempt to parse the values
     into valid data that can be used by the :func:`~eval` function.
+
+    Args:
+        json_string (str): JSON string.
+
+    Returns:
+        str: Escaped JSON string.
     """
     arg_splits = [ re.split(r'":\s{0,}"', arg) for arg in re.split(r'",\s{0,}"', json_string) ]
     escape_double_quote_values = [ f'{k}": "' + re.sub(r'"', '\\"', v) for k, v in arg_splits ]
@@ -85,8 +106,16 @@ def run_func(name: str, arguments: str) -> str:
     """
     Run `observation` mode with assistant which function name or
     arguments were been passed.
+
     Finally, it returns the response of **stringify** :class:`~dict`
     to next round conversation.
+
+    Args:
+        name (str): Tool function name.
+        arguments (str): Tool function arguments.
+
+    Returns:
+        str: The response of tool function call.
     """
     print_process(f'Calling tool {colorama.Fore.MAGENTA}{name}{colorama.Fore.RESET}, args: {colorama.Fore.BLUE}{arguments}')
     def tool_call(**kwargs: Any) -> Dict[str, Any]:
@@ -110,6 +139,13 @@ async def observe(messages: List[ChatMessage]) -> List[ChatMessage]:
     While the tool function is included in chat messages, it parsing
     the contents to separate it into the function name and arguments,
     then call the :func:`~run_func` to invoke specified function.
+
+    Args:
+        messages (List[ChatMessage]): ChatGLM message instances.
+
+    Returns:
+        List[ChatMessage]: ChatGLM message instances including \
+            the observation.
     """
     tool_call_contents = messages[-1].content.splitlines()
     func_name, func_arg = tool_call_contents[0], '\n'.join(tool_call_contents[1:])
@@ -121,6 +157,12 @@ def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, Non
     """
     Removing wether the :class:`~ChatMessage` which role is `observation`
     or `tool calls by assistant` then pop out of the list.
+
+    Args:
+        messages (List[ChatMessage]): ChatGLM message instances.
+
+    Returns:
+        Generator[ChatMessage, None, None]: ChatGLM message generator.
     """
     for message in messages:
         if message.role == ChatMessage.ROLE_OBSERVATION:
@@ -136,6 +178,13 @@ def ai_sentences_similarity(pipeline: Pipeline, *sentences: str) -> str:
     **intent** in each sentence, finally the result will follow
     the describe of `ChatMessage.ROLE_SYSTEM` prompt to answer
     it is ``yes`` or ``no``.
+
+    Args:
+        pipeline (Pipeline): ChatGLM pipeline instance.
+        sentences (str): Multiple sentences.
+
+    Returns:
+        str: The result of similarity is ``yes`` or ``no``.
     """
     system_prompt = '你需要比对用户输入两句话的语境是否相似，最后只能回答yes或no'
     sentence_concat = '"；"'.join(sentences)
@@ -152,12 +201,20 @@ def select_tool_call(
     """
     Selecting tool calls by `ChatMessage.ROLE_USER` only, and then
     iterate to compare the similarity as following selector:
-        - The last message and tool's description without any
-            sentence **punctuations**, get the most similarly
-            tool which value is large equal as ``10%``.
-        - If these items are satisfy above mentioned condition,
-            it'll be validated by :func:`~ai_sentences_similarity`
-            then response the **largest similarity** of tool function.
+    - The last message and tool's description without any
+        sentence **punctuations**, get the most similarly
+        tool which value is large equal as ``10%``.
+    - If these items are satisfy above mentioned condition,
+        it'll be validated by :func:`~ai_sentences_similarity`
+        then response the **largest similarity** of tool function.
+
+    Args:
+        message (ChatMessage): ChatGLM message instance.
+        pipeline (Pipeline): ChatGLM pipeline instance.
+
+    Returns:
+        Dict[str, str | List[Dict[str, str | bool]]] | None: Tool \
+            called function.
     """
     if message.role != ChatMessage.ROLE_USER: return
     similarities, results = [], []
@@ -198,6 +255,17 @@ def compress_message(
     truncate it to ``128`` length before the content, it just for
     collecting the characteristic of message content makes history
     easy with memory reference.
+
+    Args:
+        messages (List[ChatMessage]): ChatGLM message instances.
+        pipeline (Pipeline): ChatGLM pipeline instance.
+        max_length (int): Maximum length of message content is \
+            allowed. Defaults to 2048.
+        called (bool): Whether tool function has been called. \
+            Defaults to False.
+
+    Returns:
+        List[ChatMessage]: Compressed ChatGLM message instances.
     """
     if not called:
         if tool := select_tool_call(messages[-1], pipeline):
@@ -216,23 +284,45 @@ def compress_message(
     return messages
 
 def to_chat_messages(messages: Iterable[Dict[str, Any]]) -> List[ChatMessage]:
-    """Converting each data between type is :class:`~dict` in messages.
+    """Convert each entry which type is :class:`~dict` to \
+    :class:`~ChatMessage`.
+
+    Args:
+        messages (Iterable[Dict[str, Any]]): :class:`~dict` entries.
+
+    Returns:
+        List[ChatMessage]: converted ChatGLM message instances.
     """
     return [ ChatMessage(**m) for m in messages ]
 
 def to_dict_messages(messages: Iterable[ChatMessage]) -> List[Dict[str, str]]:
-    """Converting each data between type is :class:`~ChatMessage`.
+    """Convert each entry which type is :class:`~ChatMessage` to \
+    :class:`~dict`.
+
+    Args:
+        messages (Iterable[ChatMessage]): ChatGLM message instances.
+
+    Returns:
+        List[Dict[str, str]]: converted :class:`~dict` entries.
     """
     return [ dict(role=m.role, content=m.content) for m in messages ]
 
 def insert_image(message: ChatMessage, file_bytes: bytes) -> ChatMessage:
     """
-    Converting the **image** :class:`~bytes` data to :class:`~CImage`
-    object with ``RGB`` mode, and this object argument require type
-    is the :class:`~np.ndarray` to be :class:`~chatglm_cpp.Image`
-    _(:class:`~CImage`)_ buffer.
+    Convert the **image** :class:`~bytes` data to :class:`~CImage` \
+    object with ``RGB`` mode, and this object argument required \
+    type is the :class:`~np.ndarray` to be \
+        :class:`~chatglm_cpp.Image` aka *(:class:`~CImage`)* buffer.
 
-    _(Using :class:`~chatglm_cpp.Image` require module ``chatglm_cpp>=0.4.1``)_
+    #### NOTE:
+        Use :class:`~chatglm_cpp.Image` require module ``chatglm_cpp>=0.4.1``
+
+    Args:
+        message (ChatMessage): ChatGLM message instance.
+        file_bytes (bytes): read file bytes.
+
+    Returns:
+        ChatMessage: ChatGLM message instance with image.
     """
     img_obj = Image.open(io.BytesIO(file_bytes)).convert('RGB')
     image = CImage(cast(Buffer, np.asarray(img_obj)))

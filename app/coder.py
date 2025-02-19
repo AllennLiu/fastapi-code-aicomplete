@@ -11,8 +11,18 @@ class Script(BaseModel):
     download_count: int = 0
 
 async def save_code(settings: Settings, base_url: str, lang: str, code: str) -> str:
-    """Save the model generated code to `Redis` which is going to
-    be converted as the download **URL link** of API response.
+    """
+    Save the model generated code to `Redis` which is going to be
+    converted as the download **URL link** of API response.
+
+    Args:
+        settings (Settings): service :class:`~Settings` model.
+        base_url (str): service base URL.
+        lang (str): model generated language.
+        code (str): model generated code.
+
+    Returns:
+        str: model generated code download URL.
     """
     data = Script(code=code, created_at=datetime.datetime.now(settings.timezone).strftime('%FT%T'))
     data.filename = (script_uuid := str(uuid.uuid4())) + f'.{settings.lang_tags[lang]["ext"]}'
