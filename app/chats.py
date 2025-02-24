@@ -161,7 +161,7 @@ def remove_tool_calls(messages: List[ChatMessage]) -> Generator[ChatMessage, Non
     Args:
         messages (List[ChatMessage]): ChatGLM message instances.
 
-    Returns:
+    Yields:
         Generator[ChatMessage, None, None]: ChatGLM message generator.
     """
     for message in messages:

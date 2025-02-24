@@ -18,6 +18,7 @@ https://sms-sit.inventec.com.cn/#
 SYSTEM_PROMPT: Final[ChatMessage] = ChatMessage(role='system', content=f"""\
 Please find the URLs or tool/script paths in user's input content if they exist.
 Just return the result as a single JSON list, the format must be list[str].
+There must be no duplicate items, and the number of items must not exceed 20.
 I just need the compiled answers; I don't need code on how to implement it.
 """)
 

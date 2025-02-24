@@ -28,7 +28,7 @@ class MongoAsynchronous:
     async def connect(self) -> AsyncGenerator[AsyncIOMotorClient, None]:
         """Fetch Mongo's connection to be asynchronous context manager.
 
-        Returns:
+        Yields:
             AsyncGenerator[Redis, None]: a Mongo's connection asynchronous generator.
         """
         self.client = AsyncIOMotorClient(self.host, **self.mongo_kwargs)
@@ -73,7 +73,7 @@ class RedisAsynchronous:
     async def connect(self) -> AsyncGenerator[AsyncRedis, None]:
         """Fetch Redis's connection to be asynchronous context manager.
 
-        Returns:
+        Yields:
             AsyncGenerator[Redis, None]: a Redis's connection asynchronous generator.
         """
         self.redis = AsyncRedis(**self.redis_kwargs)
@@ -86,7 +86,7 @@ class RedisAsynchronous:
     def sync_connect(self) -> Generator[redis.Redis, Any, None]:
         """Fetch Redis's connection with provided connection pool.
 
-        Returns:
+        Yields:
             Generator[Redis, None]: a Redis's connection generator.
         """
         self.redis = redis.Redis(connection_pool=redis.ConnectionPool(**self.redis_kwargs))
