@@ -97,7 +97,7 @@ do
             ;;
         --prod|--main)
             export FASTAPI_ENV=prod
-            WORKER_NUM=4
+            WORKER_NUM=8
             ;;
         --chat)
             export MODE_CHATBOT=true

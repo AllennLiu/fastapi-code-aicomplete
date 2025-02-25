@@ -1,13 +1,14 @@
+import pkgutil
+import importlib
+from pathlib import Path
 from typing import Any, AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import suppress, asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-
 from .utils import ML, load_llm
 from .config import get_settings
-from .routers import chat, chatutils, copilot, file, llama, plan
 
 settings = get_settings()
 
@@ -27,5 +28,11 @@ cors_allows = dict(allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 app.add_middleware(CORSMiddleware, **cors_allows)
 if settings.ssl_active:
     app.add_middleware(HTTPSRedirectMiddleware)
-for r in chat, chatutils, copilot, file, llama, plan:
-    app.include_router(r.router)
+
+# dynamic load all routers from routers folder (ignore invalid router files)
+for module_info in pkgutil.iter_modules([ str(Path(__file__).parent / 'routers') ]):
+    module_name = f'app.routers.{module_info.name}'
+    with suppress(ModuleNotFoundError):
+        module = importlib.import_module(module_name)
+        if hasattr(module, 'router'):
+            app.include_router(module.router)
