@@ -1,4 +1,10 @@
-import json, copy, asyncio, colorama, datetime, operator, contextlib
+import json
+import copy
+import asyncio
+import colorama
+import datetime
+import operator
+import contextlib
 from pydantic import Field
 from chatglm_cpp import Pipeline, ChatMessage, DeltaMessage
 from starlette.responses import JSONResponse, StreamingResponse

@@ -1,4 +1,12 @@
-import re, json, httpx, colorama, datetime, operator, itertools, traceback, aiopathlib
+import re
+import json
+import httpx
+import colorama
+import datetime
+import operator
+import itertools
+import traceback
+import aiopathlib
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 from chatglm_cpp import Pipeline, ChatMessage
@@ -27,7 +35,7 @@ class SummaryResult(BaseModel):
     urls: set[str] = Field(default_factory=set, description='parsed urls')
     others: set[str] = Field(default_factory=set, description='the other parsed contents')
 
-class PrerequisiteTable(BaseModel):
+class PrerequisiteTable(BaseModel, validate_assignment=True):
     tools: set[str] | List[str] = Field(default_factory=set, description='predict prerequisite tools')
     elapsed_time: float = Field(default=0., description='predict elapsed time')
     prerequisite: str = Field(default='', description='saved prerequisite content')
@@ -69,6 +77,15 @@ async def get_plan_uuid_by_id(plan_id: int) -> str:
         plan = cast(Dict[str, Any], await collection.find_one(dict(plan_id=plan_id)))
     return plan["plan_uuid"]
 
+async def safe_prerequisite_table(query: str) -> PrerequisiteTable:
+    """
+    Convert the tool's list of prerequisite table to valid data for
+    model validation that the type is not `set[str] | List[str]`.
+    """
+    query_to_dict = cast(Dict[str, Any], json.loads(query or '{}'))
+    to_safe_data = dict(tools=set(map(str, query_to_dict.get('tools', list()))))
+    return PrerequisiteTable(**query_to_dict | to_safe_data)
+
 async def predict_prerequisites(
     pipeline: Pipeline,
     prerequisite: Prerequisite | PrerequisiteJob,
@@ -109,7 +126,7 @@ async def predict_prerequisites(
             table.elapsed_time += (now - begin).total_seconds()
             content_without_md = md_no_codeblock(response.content)
             print_process(f'parsed:\n{colorama.Fore.BLUE}{content_without_md}')
-            table.tools = cast(set[str], json.loads(content_without_md))
+            table.tools = json.loads(content_without_md)
             print_process(f'response:\n{colorama.Fore.GREEN}{table.tools}')
             return table
         except json.decoder.JSONDecodeError:
@@ -210,7 +227,7 @@ async def create_prerequisites_job(
             if todo.bkm_uuid in map(operator.attrgetter('bkm_uuid'), jobs):
                 job = next((e for e in jobs if e.bkm_uuid == todo.bkm_uuid), job_default)
                 query_table = await r.hget('model-prerequisites-table', todo.bkm_uuid)
-                table = PrerequisiteTable(**json.loads(query_table or '{}'))
+                table = await safe_prerequisite_table(str(query_table))
                 if todo.prerequisite.strip() != table.prerequisite.strip():
                     print_process(f'Detected BKM: {colorama.Fore.YELLOW}{todo.bkm_uuid}{colorama.Fore.RESET} prerequisite changed.')
                     job.completed = False
@@ -251,7 +268,7 @@ async def predict_prerequisites_job(
         print_process(f'TODO plan: {colorama.Fore.MAGENTA}{plan_uuid}({plan_id}) {colorama.Fore.BLUE}case\'s job{colorama.Fore.RESET} remain: {colorama.Fore.RED}{num}')
         for job in jobs:
             query = await r.hget('model-prerequisites-table', job.bkm_uuid)
-            table = PrerequisiteTable(**json.loads(query or '{}'))
+            table = await safe_prerequisite_table(str(query))
             if job.completed:
                 tables.append(table)
             else:
@@ -276,7 +293,7 @@ def summary_tools(tables: List[PrerequisiteTable]) -> tuple[SummaryResult, float
         tuple[SummaryResult, float]: a tuple with summary result \
             and total elapsed time.
     """
-    pattern_iec = re.compile(r'.*inventec.com|inventeccorp-my.sharepoint.com.*')
+    pattern_iec = re.compile(r'.*(inventec.com|inventeccorp-my.sharepoint.com).*')
     pattern_url = re.compile(r'^(https?|ftp)://([a-zA-Z0-9.-]+)(:\d+)?(/.*)?$')
     pattern_unix_path = re.compile(r'^(/[^/ ]*)+/?$')
     summary = SummaryResult()

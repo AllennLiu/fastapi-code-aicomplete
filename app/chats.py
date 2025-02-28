@@ -1,8 +1,15 @@
-import io, re, json, datetime, operator, textwrap, colorama, traceback
+import io
+import re
+import json
+import datetime
+import textwrap
+import colorama
+import traceback
 import numpy as np
 import jieba.posseg as pseg
 from PIL import Image
 from zoneinfo import ZoneInfo
+from operator import itemgetter
 from chatglm_cpp import Pipeline, ChatMessage
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Buffer
@@ -81,7 +88,7 @@ def func_called(message: ChatMessage) -> bool:
         bool: Whether the first line of message content which name is \
             included in `REGISTERED_TOOLS`.
     """
-    return message.content.splitlines()[0] in map(operator.itemgetter('name'), REGISTERED_TOOLS)
+    return message.content.splitlines()[0] in map(itemgetter('name'), REGISTERED_TOOLS)
 
 def escape_json_values(json_string: str) -> str:
     """
@@ -230,7 +237,7 @@ def select_tool_call(
         print_process(f'Func: {tool["name"]: <25} Similarity: {f"{percent}%": <8} AI: {result: >3}')
         if result == 'yes':
             results.append((tool, percent))
-    return max(results, key=operator.itemgetter(1))[0] if results else None
+    return max(results, key=itemgetter(1))[0] if results else None
 
 def compress_message(
     messages: List[ChatMessage], pipeline: Pipeline, max_length: int = 2048, called: bool = False

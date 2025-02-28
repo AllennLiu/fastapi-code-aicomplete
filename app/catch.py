@@ -1,4 +1,6 @@
-import re, functools, contextlib
+import re
+import contextlib
+from functools import wraps
 from typing import Any, Callable, Coroutine, Final, TypeVar
 from fastapi import status, HTTPException, WebSocketDisconnect
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
@@ -16,7 +18,7 @@ def load_model_catch(
     of ``Model Not Loaded`` and raise `status.HTTP_404_NOT_FOUND`
     or raise the root cause exception.
     """
-    @functools.wraps(func)
+    @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> NO_MODEL_T:
         try:
             return await func(*args, **kwargs)
@@ -39,11 +41,11 @@ def websocket_catch(
 
     由於裝飾器 (`decorator`) 會接收一個函數當參數，然後返 回新的\
     函數，這樣會導致被包裝函數的名子與注釋消失，如此便需要使用\
-    :func:`~functools.wraps` 裝飾子修正
+    :func:`~wraps` 裝飾子修正
 
     函數的名子與注釋：`func.__name__`、`func.__doc__`
     """
-    @functools.wraps(func)
+    @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> WEBSOCKET_T | None:
         exceptions = (WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK, Exception)
         with contextlib.suppress(*exceptions):

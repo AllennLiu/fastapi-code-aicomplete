@@ -1,4 +1,7 @@
-import asyncio, colorama, datetime, contextlib
+import asyncio
+import colorama
+import datetime
+import contextlib
 from pydantic import BaseModel, Field
 from ollama import ChatResponse, Message
 from starlette.responses import StreamingResponse

@@ -1,4 +1,6 @@
-import os, json, uuid, datetime
+import os
+import uuid
+import datetime
 from pydantic import BaseModel
 from .config import Settings
 from .db import RedisAsynchronous
@@ -28,5 +30,5 @@ async def save_code(settings: Settings, base_url: str, lang: str, code: str) -> 
     data.filename = (script_uuid := str(uuid.uuid4())) + f'.{settings.lang_tags[lang]["ext"]}'
     data.url = os.path.join(base_url, 'file/download/script', script_uuid)
     async with RedisAsynchronous(**settings.redis.model_dump(), decode_responses=True).connect() as r:
-        await r.hset('model-generated-scripts', script_uuid, json.dumps(data.model_dump(mode='json')))
+        await r.hset('model-generated-scripts', script_uuid, data.model_dump_json())
     return data.url

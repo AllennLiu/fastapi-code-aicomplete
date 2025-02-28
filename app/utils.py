@@ -1,4 +1,15 @@
-import re, torch, string, opencc, pymupdf, asyncio, aiofiles, aiopathlib, colorama, markdown, textwrap, itertools
+import re
+import torch
+import string
+import opencc
+import pymupdf
+import colorama
+import markdown
+import textwrap
+import itertools
+import asyncio
+import aiofiles
+import aiopathlib
 import markdown.blockprocessors
 from PIL import Image
 from docx import Document
